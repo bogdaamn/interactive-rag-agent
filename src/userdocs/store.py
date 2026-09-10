@@ -49,6 +49,10 @@ class UserDocsStore:
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING "
                 f"vec0(embedding FLOAT[{EMBEDDING_DIM}])"
             )
+            self._conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING "
+                "fts5(text, tokenize='porter unicode61')"
+            )
             self._conn.commit()
         except sqlite3.Error as exc:
             raise SQLiteStoreError(f"Failed to initialize userdocs.db: {exc}") from exc
@@ -82,6 +86,10 @@ class UserDocsStore:
                 self._conn.execute(
                     "INSERT INTO chunk_vectors (rowid, embedding) VALUES (?, ?)",
                     (chunk_id, sqlite_vec.serialize_float32(vector.tolist())),
+                )
+                self._conn.execute(
+                    "INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)",
+                    (chunk_id, chunk["text"]),
                 )
             self._conn.commit()
         except sqlite3.Error as exc:
@@ -177,6 +185,9 @@ class UserDocsStore:
                 placeholders = ",".join("?" for _ in chunk_ids)
                 self._conn.execute(
                     f"DELETE FROM chunk_vectors WHERE rowid IN ({placeholders})", chunk_ids
+                )
+                self._conn.execute(
+                    f"DELETE FROM chunks_fts WHERE rowid IN ({placeholders})", chunk_ids
                 )
 
             self._conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))

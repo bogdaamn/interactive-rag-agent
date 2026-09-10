@@ -190,3 +190,40 @@ def test_delete_document_cannot_delete_another_users_file(tmp_path):
     assert deleted is False
     assert store._conn.execute("SELECT COUNT(*) FROM documents WHERE id = ?", (doc_id,)).fetchone()[0] == 1
     store.close()
+
+
+def test_insert_chunks_also_populates_fts_index(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    doc_id = store.insert_document(1, "policy.txt", ".txt")
+    store.insert_chunks_with_vectors(
+        doc_id,
+        [{"text": "employees receive vacation days", "chunk_index": 0, "page": None}],
+        np.zeros((1, 384), dtype=np.float32),
+    )
+
+    rows = store._conn.execute(
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'vacation'"
+    ).fetchall()
+    assert len(rows) == 1
+
+    chunk_id = store._conn.execute("SELECT id FROM chunks").fetchone()[0]
+    assert rows[0][0] == chunk_id
+    store.close()
+
+
+def test_delete_document_also_clears_fts_rows(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    doc_id = store.insert_document(1, "policy.txt", ".txt")
+    store.insert_chunks_with_vectors(
+        doc_id,
+        [{"text": "employees receive vacation days", "chunk_index": 0, "page": None}],
+        np.zeros((1, 384), dtype=np.float32),
+    )
+
+    store.delete_document(user_id=1, filename="policy.txt")
+
+    rows = store._conn.execute(
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'vacation'"
+    ).fetchall()
+    assert rows == []
+    store.close()
