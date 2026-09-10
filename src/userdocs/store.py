@@ -128,5 +128,34 @@ class UserDocsStore:
         except sqlite3.Error as exc:
             raise SQLiteStoreError(f"Vector search failed: {exc}") from exc
 
+    def get_chunk(self, chunk_id: int) -> dict:
+        try:
+            row = self._conn.execute(
+                "SELECT c.text, c.chunk_index, c.page, d.filename "
+                "FROM chunks c JOIN documents d ON d.id = c.document_id "
+                "WHERE c.id = ?",
+                (chunk_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise SQLiteStoreError(f"Failed to fetch chunk {chunk_id}: {exc}") from exc
+        if row is None:
+            raise SQLiteStoreError(f"No chunk with id {chunk_id}")
+        text, chunk_index, page, filename = row
+        return {"text": text, "chunk_index": chunk_index, "page": page, "filename": filename}
+
+    def list_documents(self, user_id: int) -> list:
+        try:
+            rows = self._conn.execute(
+                "SELECT id, filename, file_type, created_at FROM documents "
+                "WHERE user_id = ? ORDER BY created_at ASC",
+                (user_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise SQLiteStoreError(f"Failed to list documents for user {user_id}: {exc}") from exc
+        return [
+            {"id": r[0], "filename": r[1], "file_type": r[2], "created_at": r[3]}
+            for r in rows
+        ]
+
     def close(self) -> None:
         self._conn.close()

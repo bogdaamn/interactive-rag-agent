@@ -119,3 +119,34 @@ def test_search_vectors_never_returns_another_users_chunks(tmp_path):
     }
     assert result_chunk_ids.isdisjoint(user1_chunk_ids)
     store.close()
+
+
+def test_get_chunk_returns_text_and_source_filename(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    doc_id = store.insert_document(1, "policy.pdf", ".pdf")
+    store.insert_chunks_with_vectors(
+        doc_id,
+        [{"text": "vacation info", "chunk_index": 0, "page": 3}],
+        np.zeros((1, 384), dtype=np.float32),
+    )
+    chunk_id = store._conn.execute("SELECT id FROM chunks").fetchone()[0]
+
+    chunk = store.get_chunk(chunk_id)
+    assert chunk == {
+        "text": "vacation info",
+        "chunk_index": 0,
+        "page": 3,
+        "filename": "policy.pdf",
+    }
+    store.close()
+
+
+def test_list_documents_returns_only_this_users_documents_ordered(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    store.insert_document(1, "a.txt", ".txt")
+    store.insert_document(1, "b.txt", ".txt")
+    store.insert_document(2, "other_user.txt", ".txt")
+
+    docs = store.list_documents(user_id=1)
+    assert [d["filename"] for d in docs] == ["a.txt", "b.txt"]
+    store.close()
