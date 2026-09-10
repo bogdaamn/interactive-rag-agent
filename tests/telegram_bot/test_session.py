@@ -43,3 +43,30 @@ def test_get_or_create_returns_the_same_session_object_for_the_same_user(tmp_pat
     store = SessionStore(str(tmp_path / "test.db"))
     assert store.get_or_create(user_id=1) is store.get_or_create(user_id=1)
     store.close()
+
+
+def test_one_users_history_never_appears_in_anothers(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+
+    session_a = store.get_or_create(user_id=1)
+    session_a.append_user_message("What is my salary?")
+    session_a.append_assistant_message("Your salary is confidential information X.")
+
+    session_b = store.get_or_create(user_id=2)
+    session_b.append_user_message("What are the office hours?")
+
+    b_contents = [m["content"] for m in session_b.messages()]
+    assert b_contents == ["What are the office hours?"]
+    assert not any("confidential information X" in c for c in b_contents)
+    store.close()
+
+
+def test_a_new_users_session_is_empty_even_when_others_have_history(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+
+    session_a = store.get_or_create(user_id=1)
+    session_a.append_user_message("first user's question")
+    session_a.append_assistant_message("first user's answer")
+
+    assert store.get_or_create(user_id=2).messages() == []
+    store.close()
