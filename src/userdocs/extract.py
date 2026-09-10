@@ -4,6 +4,7 @@ import io
 from dataclasses import dataclass
 
 from docx import Document as DocxDocument
+from pypdf import PdfReader
 
 from userdocs.errors import CorruptDocumentError, UnsupportedFormatError
 
@@ -43,5 +44,18 @@ def extract_text(filename: str, raw_bytes: bytes) -> ExtractedDocument:
             raise CorruptDocumentError(f"{filename} could not be parsed as .docx") from exc
         text = "\n".join(p.text for p in doc.paragraphs)
         return ExtractedDocument(text=text, pages=None)
+
+    if ext == ".pdf":
+        try:
+            reader = PdfReader(io.BytesIO(raw_bytes))
+            # `reader.pages` is lazy — page text is only extracted (and only
+            # fails) when iterated, so the iteration has to be INSIDE the try.
+            pages = [(page.extract_text() or "") for page in reader.pages]
+        except Exception as exc:
+            # Broad for the same reason as .docx above: pypdf raises
+            # PdfReadError for a bad trailer but other exception types for
+            # damaged xref tables, bad encodings, or encrypted files.
+            raise CorruptDocumentError(f"{filename} could not be parsed as .pdf") from exc
+        return ExtractedDocument(text="\n".join(pages), pages=pages)
 
     raise UnsupportedFormatError(f"Extension {ext!r} not yet implemented")
