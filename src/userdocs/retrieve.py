@@ -19,13 +19,14 @@ from userdocs.config import (
     CANDIDATE_K,
     HYBRID_SEARCH_ENABLED,
     RELEVANCE_THRESHOLD,
+    RERANK_ENABLED,
     TOP_K,
 )
 from userdocs.embed import embed_chunks
+from userdocs.errors import RerankError
 from userdocs.fusion import rrf_fuse
+from userdocs.rerank import rerank
 from userdocs.textsearch import search_fts
-
-RERANK_ENABLED = False   # flipped on in Task 7
 
 
 @dataclass
@@ -66,4 +67,15 @@ def retrieve(store, user_id: int, query: str) -> list:
             )
         )
 
-    return [c for c in candidates if c.score >= RELEVANCE_THRESHOLD]
+    survivors = [c for c in candidates if c.score >= RELEVANCE_THRESHOLD]
+
+    if RERANK_ENABLED and survivors:
+        try:
+            survivors = rerank(query, survivors)
+        except RerankError:
+            # Reranking is a quality improvement, not a correctness
+            # requirement — keep the pre-rerank order rather than losing the
+            # answer entirely.
+            pass
+
+    return survivors

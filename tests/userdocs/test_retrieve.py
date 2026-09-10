@@ -1,5 +1,6 @@
 import numpy as np
 
+from userdocs.errors import RerankError
 from userdocs.retrieve import RetrievedChunk, retrieve
 from userdocs.store import UserDocsStore
 
@@ -131,3 +132,54 @@ def test_retrieve_drops_fused_hits_that_have_no_similarity_score(monkeypatch):
     results = retrieve(store, user_id=1, query="some query")
 
     assert [r.text for r in results] == ["relevant"]
+
+
+def test_retrieve_applies_reranking_when_enabled(monkeypatch):
+    import userdocs.retrieve as retrieve_module
+
+    monkeypatch.setattr(
+        retrieve_module, "embed_chunks", lambda texts: np.zeros((1, 384), dtype=np.float32)
+    )
+    monkeypatch.setattr(retrieve_module, "HYBRID_SEARCH_ENABLED", False)
+    monkeypatch.setattr(retrieve_module, "RERANK_ENABLED", True)
+    # rerank reverses the order, so a difference is observable
+    monkeypatch.setattr(retrieve_module, "rerank", lambda query, candidates: list(reversed(candidates)))
+
+    store = FakeStore(
+        vector_hits=[(1, 0.90), (2, 0.80)],
+        chunks={
+            1: {"text": "first by vector", "chunk_index": 0, "page": None, "filename": "a.txt"},
+            2: {"text": "second by vector", "chunk_index": 1, "page": None, "filename": "a.txt"},
+        },
+    )
+
+    results = retrieve(store, user_id=1, query="q")
+
+    assert [r.text for r in results] == ["second by vector", "first by vector"]
+
+
+def test_retrieve_falls_back_to_unreranked_order_when_rerank_fails(monkeypatch):
+    import userdocs.retrieve as retrieve_module
+
+    monkeypatch.setattr(
+        retrieve_module, "embed_chunks", lambda texts: np.zeros((1, 384), dtype=np.float32)
+    )
+    monkeypatch.setattr(retrieve_module, "HYBRID_SEARCH_ENABLED", False)
+    monkeypatch.setattr(retrieve_module, "RERANK_ENABLED", True)
+
+    def boom(query, candidates):
+        raise RerankError("model unavailable")
+
+    monkeypatch.setattr(retrieve_module, "rerank", boom)
+
+    store = FakeStore(
+        vector_hits=[(1, 0.90), (2, 0.80)],
+        chunks={
+            1: {"text": "first by vector", "chunk_index": 0, "page": None, "filename": "a.txt"},
+            2: {"text": "second by vector", "chunk_index": 1, "page": None, "filename": "a.txt"},
+        },
+    )
+
+    # A reranking failure must degrade quality, not availability.
+    results = retrieve(store, user_id=1, query="q")
+    assert [r.text for r in results] == ["first by vector", "second by vector"]
