@@ -150,3 +150,43 @@ def test_list_documents_returns_only_this_users_documents_ordered(tmp_path):
     docs = store.list_documents(user_id=1)
     assert [d["filename"] for d in docs] == ["a.txt", "b.txt"]
     store.close()
+
+
+def test_delete_document_removes_document_chunks_and_vectors(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    doc_id = store.insert_document(1, "old.txt", ".txt")
+    store.insert_chunks_with_vectors(
+        doc_id, [{"text": "x", "chunk_index": 0, "page": None}],
+        np.zeros((1, 384), dtype=np.float32),
+    )
+
+    deleted = store.delete_document(user_id=1, filename="old.txt")
+
+    assert deleted is True
+    assert store._conn.execute("SELECT COUNT(*) FROM documents WHERE id = ?", (doc_id,)).fetchone()[0] == 0
+    assert store._conn.execute("SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc_id,)).fetchone()[0] == 0
+    assert store._conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0] == 0
+    store.close()
+
+
+def test_delete_document_returns_false_when_not_found(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    deleted = store.delete_document(user_id=1, filename="does_not_exist.txt")
+    assert deleted is False
+    store.close()
+
+
+def test_delete_document_cannot_delete_another_users_file(tmp_path):
+    store = UserDocsStore(str(tmp_path / "test.db"))
+    doc_id = store.insert_document(user_id=1, filename="shared_name.txt", file_type=".txt")
+    store.insert_chunks_with_vectors(
+        doc_id, [{"text": "user1 data", "chunk_index": 0, "page": None}],
+        np.zeros((1, 384), dtype=np.float32),
+    )
+
+    # user 2 tries to delete a file with the same name they never uploaded
+    deleted = store.delete_document(user_id=2, filename="shared_name.txt")
+
+    assert deleted is False
+    assert store._conn.execute("SELECT COUNT(*) FROM documents WHERE id = ?", (doc_id,)).fetchone()[0] == 1
+    store.close()

@@ -157,5 +157,34 @@ class UserDocsStore:
             for r in rows
         ]
 
+    def delete_document(self, user_id: int, filename: str) -> bool:
+        try:
+            row = self._conn.execute(
+                "SELECT id FROM documents WHERE user_id = ? AND filename = ?",
+                (user_id, filename),
+            ).fetchone()
+            if row is None:
+                return False
+            document_id = row[0]
+
+            chunk_ids = [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
+                ).fetchall()
+            ]
+            if chunk_ids:
+                placeholders = ",".join("?" for _ in chunk_ids)
+                self._conn.execute(
+                    f"DELETE FROM chunk_vectors WHERE rowid IN ({placeholders})", chunk_ids
+                )
+
+            self._conn.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+            self._conn.commit()
+            return True
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise SQLiteStoreError(f"Failed to delete document {filename!r}: {exc}") from exc
+
     def close(self) -> None:
         self._conn.close()
