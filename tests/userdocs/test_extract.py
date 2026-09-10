@@ -3,7 +3,7 @@ from pathlib import Path
 
 from docx import Document as DocxDocument
 
-from userdocs.errors import CorruptDocumentError
+from userdocs.errors import CorruptDocumentError, EmptyDocumentError
 from userdocs.extract import extract_text
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -59,4 +59,12 @@ def test_extract_pdf_corrupt_file_raises_corrupt_document_error():
         extract_text("broken.pdf", raw)
         assert False, "expected CorruptDocumentError"
     except CorruptDocumentError:
+        pass
+
+
+def test_extract_txt_empty_file_raises_empty_document_error():
+    try:
+        extract_text("empty.txt", b"   \n\n  ")
+        assert False, "expected EmptyDocumentError"
+    except EmptyDocumentError:
         pass

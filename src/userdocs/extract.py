@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from docx import Document as DocxDocument
 from pypdf import PdfReader
 
-from userdocs.errors import CorruptDocumentError, UnsupportedFormatError
+from userdocs.errors import CorruptDocumentError, EmptyDocumentError, UnsupportedFormatError
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".docx", ".pdf"}
 
@@ -29,9 +29,8 @@ def extract_text(filename: str, raw_bytes: bytes) -> ExtractedDocument:
 
     if ext in (".txt", ".md"):
         text = raw_bytes.decode("utf-8", errors="replace")
-        return ExtractedDocument(text=text, pages=None)
-
-    if ext == ".docx":
+        result = ExtractedDocument(text=text, pages=None)
+    elif ext == ".docx":
         try:
             doc = DocxDocument(io.BytesIO(raw_bytes))
         except Exception as exc:
@@ -43,9 +42,8 @@ def extract_text(filename: str, raw_bytes: bytes) -> ExtractedDocument:
             # enumerating a list that a new python-docx version can invalidate.
             raise CorruptDocumentError(f"{filename} could not be parsed as .docx") from exc
         text = "\n".join(p.text for p in doc.paragraphs)
-        return ExtractedDocument(text=text, pages=None)
-
-    if ext == ".pdf":
+        result = ExtractedDocument(text=text, pages=None)
+    else:  # ".pdf"
         try:
             reader = PdfReader(io.BytesIO(raw_bytes))
             # `reader.pages` is lazy — page text is only extracted (and only
@@ -56,6 +54,8 @@ def extract_text(filename: str, raw_bytes: bytes) -> ExtractedDocument:
             # PdfReadError for a bad trailer but other exception types for
             # damaged xref tables, bad encodings, or encrypted files.
             raise CorruptDocumentError(f"{filename} could not be parsed as .pdf") from exc
-        return ExtractedDocument(text="\n".join(pages), pages=pages)
+        result = ExtractedDocument(text="\n".join(pages), pages=pages)
 
-    raise UnsupportedFormatError(f"Extension {ext!r} not yet implemented")
+    if not result.text.strip():
+        raise EmptyDocumentError(f"{filename} contains no extractable text")
+    return result
