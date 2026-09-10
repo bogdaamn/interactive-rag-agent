@@ -216,6 +216,10 @@ datasets/
 *.json
 *.parquet
 
+# ...but the RAG evaluation dataset is a small, version-controlled fixture, not
+# generated/large data output.
+!eval/userdocs_eval.json
+
 # Documentation build
 docs/_build/
 site/
