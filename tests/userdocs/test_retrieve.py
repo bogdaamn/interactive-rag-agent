@@ -79,3 +79,55 @@ def test_retrieve_returns_empty_when_user_has_no_documents(monkeypatch):
 
     store = FakeStore(vector_hits=[], chunks={})
     assert retrieve(store, user_id=1, query="anything at all") == []
+
+
+def test_retrieve_includes_keyword_only_hits_when_hybrid_enabled(monkeypatch):
+    import userdocs.retrieve as retrieve_module
+
+    monkeypatch.setattr(
+        retrieve_module, "embed_chunks", lambda texts: np.zeros((1, 384), dtype=np.float32)
+    )
+    monkeypatch.setattr(retrieve_module, "HYBRID_SEARCH_ENABLED", True)
+    monkeypatch.setattr(retrieve_module, "RERANK_ENABLED", False)
+    # chunk 3 is found ONLY by keyword search, not by vector search
+    monkeypatch.setattr(retrieve_module, "search_fts", lambda store, uid, q, k: [3])
+
+    store = FakeStore(
+        vector_hits=[(1, 0.80), (3, 0.61)],
+        chunks={
+            1: {"text": "vector hit", "chunk_index": 0, "page": None, "filename": "a.txt"},
+            3: {"text": "keyword hit", "chunk_index": 2, "page": None, "filename": "a.txt"},
+        },
+    )
+
+    results = retrieve(store, user_id=1, query="some query")
+
+    texts = [r.text for r in results]
+    assert "keyword hit" in texts
+    assert "vector hit" in texts
+
+
+def test_retrieve_drops_fused_hits_that_have_no_similarity_score(monkeypatch):
+    """A chunk surfaced only by keyword search whose cosine similarity is below
+    the threshold must still be dropped — the threshold is the single gate for
+    every branch, not just the vector one."""
+    import userdocs.retrieve as retrieve_module
+
+    monkeypatch.setattr(
+        retrieve_module, "embed_chunks", lambda texts: np.zeros((1, 384), dtype=np.float32)
+    )
+    monkeypatch.setattr(retrieve_module, "HYBRID_SEARCH_ENABLED", True)
+    monkeypatch.setattr(retrieve_module, "RERANK_ENABLED", False)
+    monkeypatch.setattr(retrieve_module, "search_fts", lambda store, uid, q, k: [9])
+
+    store = FakeStore(
+        vector_hits=[(1, 0.80)],   # chunk 9 has no vector hit at all
+        chunks={
+            1: {"text": "relevant", "chunk_index": 0, "page": None, "filename": "a.txt"},
+            9: {"text": "keyword only, irrelevant", "chunk_index": 8, "page": None, "filename": "a.txt"},
+        },
+    )
+
+    results = retrieve(store, user_id=1, query="some query")
+
+    assert [r.text for r in results] == ["relevant"]
