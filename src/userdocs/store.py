@@ -88,5 +88,45 @@ class UserDocsStore:
             self._conn.rollback()
             raise SQLiteStoreError(f"Failed to insert chunks/vectors: {exc}") from exc
 
+    def search_vectors(self, user_id: int, query_vector, k: int) -> list:
+        try:
+            document_ids = [
+                row[0]
+                for row in self._conn.execute(
+                    "SELECT id FROM documents WHERE user_id = ?", (user_id,)
+                ).fetchall()
+            ]
+            if not document_ids:
+                return []
+
+            placeholders = ",".join("?" for _ in document_ids)
+            chunk_ids = {
+                row[0]
+                for row in self._conn.execute(
+                    f"SELECT id FROM chunks WHERE document_id IN ({placeholders})",
+                    document_ids,
+                ).fetchall()
+            }
+            if not chunk_ids:
+                return []
+
+            over_fetch_k = min(max(k, len(chunk_ids)), 500)
+            rows = self._conn.execute(
+                "SELECT rowid, distance FROM chunk_vectors "
+                "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                (sqlite_vec.serialize_float32(list(query_vector)), over_fetch_k),
+            ).fetchall()
+
+            results = []
+            for rowid, distance in rows:
+                if rowid in chunk_ids:
+                    cosine_similarity = 1.0 - (distance ** 2) / 2.0
+                    results.append((rowid, cosine_similarity))
+                if len(results) >= k:
+                    break
+            return results
+        except sqlite3.Error as exc:
+            raise SQLiteStoreError(f"Vector search failed: {exc}") from exc
+
     def close(self) -> None:
         self._conn.close()
