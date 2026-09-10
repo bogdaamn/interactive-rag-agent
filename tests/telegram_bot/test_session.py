@@ -1,4 +1,5 @@
 from telegram_bot.session import SessionStore
+from userdocs.config import CONVERSATION_HISTORY_TURNS
 
 
 def test_append_and_read_back_a_single_turn(tmp_path):
@@ -69,4 +70,45 @@ def test_a_new_users_session_is_empty_even_when_others_have_history(tmp_path):
     session_a.append_assistant_message("first user's answer")
 
     assert store.get_or_create(user_id=2).messages() == []
+    store.close()
+
+
+def test_messages_returns_at_most_the_configured_window(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+    session = store.get_or_create(user_id=1)
+
+    for turn in range(CONVERSATION_HISTORY_TURNS + 4):
+        session.append_user_message(f"question {turn}")
+        session.append_assistant_message(f"answer {turn}")
+
+    messages = session.messages()
+    assert len(messages) == CONVERSATION_HISTORY_TURNS * 2
+    store.close()
+
+
+def test_messages_window_keeps_the_most_recent_turns_in_order(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+    session = store.get_or_create(user_id=1)
+
+    for turn in range(CONVERSATION_HISTORY_TURNS + 4):
+        session.append_user_message(f"question {turn}")
+        session.append_assistant_message(f"answer {turn}")
+
+    messages = session.messages()
+    last_turn = CONVERSATION_HISTORY_TURNS + 3
+
+    # oldest turns are dropped, newest are kept, chronological order preserved
+    assert messages[-1] == {"role": "assistant", "content": f"answer {last_turn}"}
+    assert messages[-2] == {"role": "user", "content": f"question {last_turn}"}
+    assert not any(m["content"] == "question 0" for m in messages)
+    store.close()
+
+
+def test_messages_window_does_not_truncate_a_short_history(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+    session = store.get_or_create(user_id=1)
+    session.append_user_message("only question")
+    session.append_assistant_message("only answer")
+
+    assert len(session.messages()) == 2
     store.close()

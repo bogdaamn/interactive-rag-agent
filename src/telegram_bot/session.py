@@ -11,6 +11,7 @@ documents are one thing to inspect, back up, or remove.
 import datetime
 import sqlite3
 
+from userdocs.config import CONVERSATION_HISTORY_TURNS
 from userdocs.errors import SQLiteStoreError
 
 _SCHEMA = """
@@ -50,15 +51,23 @@ class Session:
         self._append("assistant", text)
 
     def messages(self) -> list:
+        """The most recent CONVERSATION_HISTORY_TURNS turns, oldest first.
+
+        Bounded so a long conversation doesn't grow every prompt without limit
+        (spec §12). Fetched newest-first with a LIMIT — cheaper than reading the
+        whole history and slicing — then reversed back into chronological order,
+        which is what the LLM expects.
+        """
+        window_size = CONVERSATION_HISTORY_TURNS * 2
         try:
             rows = self._conn.execute(
                 "SELECT role, content FROM conversation_messages "
-                "WHERE user_id = ? ORDER BY id ASC",
-                (self._user_id,),
+                "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+                (self._user_id, window_size),
             ).fetchall()
         except sqlite3.Error as exc:
             raise SQLiteStoreError(f"Failed to read conversation history: {exc}") from exc
-        return [{"role": role, "content": content} for role, content in rows]
+        return [{"role": role, "content": content} for role, content in reversed(rows)]
 
 
 class SessionStore:
