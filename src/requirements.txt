@@ -18,3 +18,8 @@ pytest>=7.4.0
 pytest-asyncio>=0.23.0
 
 sqlite-vec
+
+# Telegram bot
+aiogram
+httpx
+python-dotenv
