@@ -1,0 +1,135 @@
+SQLite
+
+Source: https://en.wikipedia.org/wiki/SQLite (CC BY-SA 4.0)
+
+SQLite ( "S-Q-L-ite",  "sequel-ite") is a free and open-source relational database engine written in the C programming language. It is not a standalone application; rather, it is a library that software developers embed in their applications. As such, it belongs to the family of embedded databases. According to its developers, SQLite is the most widely deployed database engine, as it is used by several of the top web browsers, operating systems, mobile phones, and other embedded systems.
+Many programming languages have bindings to the SQLite library. It generally follows PostgreSQL syntax, but does not enforce type checking by default. This means that one can, for example, insert a string into a column defined as an integer. Although it is a lightweight embedded database, SQLite implements most of the SQL standard and the relational model, including transactions and ACID guarantees. However, it omits many features implemented by other databases, such as materialized views and complete support for triggers and ALTER TABLE statements.
+
+
+== History ==
+D. Richard Hipp designed SQLite in the spring of 2000 while working for General Dynamics on contract with the United States Navy. Hipp was designing software used for a damage-control system aboard guided-missile destroyers; the damage-control system originally used HP-UX with an Informix database back-end. SQLite began as a Tcl extension.
+In August 2000, version 1.0 of SQLite was released, with storage based on gdbm (GNU Database Manager). In September 2001, SQLite 2.0 replaced gdbm with a custom B-tree implementation, adding transaction capability. In June 2004, SQLite 3.0 added internationalization, manifest typing, and other major improvements, partially funded by America Online. In 2011, Hipp announced his plans to add a NoSQL interface to SQLite, as well as announcing UnQL, a functional superset of SQL designed for document-oriented databases.
+SQLite is one of four formats recommended for long-term storage of datasets approved for use by the United States Library of Congress.
+
+
+== Design ==
+SQLite was designed to allow the program to be operated without installing a database management system or requiring a database administrator. Unlike client–server database management systems, the SQLite engine has no standalone processes with which the application program communicates. Instead, a linker integrates the SQLite library—statically or dynamically—into an application program which uses SQLite's functionality through simple function calls, reducing latency in database operations; for simple queries with little concurrency, SQLite performance profits from avoiding the overhead of inter-process communication.
+Due to the serverless design, SQLite applications require less configuration than client–server databases. SQLite is called zero-configuration because configuration tasks such as service management, startup scripts, and password- or GRANT-based access control are unnecessary. Access control is handled through the file-system permissions of the database file. Databases in client–server systems use file-system permissions that give access to the database files only to the daemon process, which handles its locks internally, allowing concurrent writes from several processes.
+SQLite stores the entire database, consisting of definitions, tables, indices, and data, as a single cross-platform file, allowing several processes or threads to access the same database concurrently. It implements this simple design by locking the database file during writing. Write access may fail with an error code, or it can be retried until a configurable timeout expires. SQLite read operations can be multitasked, though due to the serverless design, writes can only be performed sequentially. This concurrent access restriction does not apply to temporary tables, and it is relaxed in version 3.7 as write-ahead logging (WAL) enables concurrent reads and writes. Since SQLite has to rely on file-system locks, it is not the preferred choice for write-intensive deployments.
+SQLite uses PostgreSQL as a reference platform. "What would PostgreSQL do" is used to make sense of the SQL standard. One major deviation is that, with the exception of primary keys, SQLite does not enforce type checking; the type of a value is dynamic and not strictly constrained by the schema (although the schema will trigger a conversion when storing, if such a conversion is potentially reversible). SQLite strives to follow Postel's rule.
+
+
+== Features ==
+SQLite implements most of the SQL-92 standard for SQL, but lacks some features. For example, it only partially provides triggers and cannot write to views (however, it provides INSTEAD OF triggers that provide this functionality). Its support of ALTER TABLE statements is limited.
+SQLite uses an unusual type system for an SQL-compatible DBMS: instead of assigning a type to a column as in most SQL database systems, types are assigned to individual values; in language terms it is dynamically typed. Moreover, it is weakly typed in some of the same ways that Perl is: one can insert a string into an integer column (although SQLite will try to convert the string to an integer first, if the column's preferred type is integer). This adds flexibility to columns, especially when bound to a dynamically typed scripting language. However, the technique is not portable to other SQL products. A common criticism is that SQLite's type system lacks the data integrity mechanism provided by statically typed columns, although it can be emulated with constraints like CHECK(typeof(x)='integer'). In 2021, support for static typing was added through STRICT tables, which enforce datatype constraints for columns.
+Tables normally include a hidden rowid index column, which provides faster access. If a table includes an INTEGER PRIMARY KEY column, SQLite will typically optimize it by treating it as an alias for the rowid, causing the contents to be stored as a strictly typed 64-bit signed integer and changing its behavior to be somewhat like an auto-incrementing column. SQLite includes an option to create a table without a rowid column, which can save disk space and improve lookup speed. WITHOUT ROWID tables are required to have a primary key.
+SQLite supports foreign key constraints, although they are disabled by default and must be manually enabled with a PRAGMA statement.
+Stored procedures are not supported; this is an explicit choice by the developers to favor simplicity, as the typical use case of SQLite is to be embedded inside a host application that can define its own procedures around the database.
+SQLite does not have full Unicode support by default for backwards compatibility and due to the size of the Unicode tables, which are larger than the SQLite library. Full support for Unicode case-conversions can be enabled through an optional extension.
+SQLite supports full-text search through its FTS5 loadable extension, which allows users to efficiently search for a keyword in a large number of documents similar to how search engines search webpages.
+SQLite includes support for working with JSON through its json1 extension, which is enabled by default since 2021. SQLite's JSON functions can handle JSON5 syntax since 2023. In 2024, SQLite added support for JSONB, a binary serialization of SQLite's internal representation of JSON. Using JSONB allows applications to avoid having to parse the JSON text each time it is processed and saves a small amount of disk space.
+In May 2025, the 25th‑anniversary release SQLite 3.50.0 introduced additional features, including new Unicode functions (unistr() and unistr_quote()), a new API (sqlite3_setlk_timeout()) for setting lock timeouts, improved command‑line tools and rsync utility enhancements, and optimized JSONB.
+The maximum supported size for an SQLite database file is 281 terabytes.
+SQLite normally stores every table and index in a SQLite database in a single ordinary disk file. Alternatively, SQLite can be told to keep a SQL database entirely in memory as an in-memory database with the :memory: connection string.
+
+
+== Development and distribution ==
+SQLite's code is hosted with Fossil, a distributed version control system that uses SQLite as a local cache for its non-relational database format, and SQLite's SQL as an implementation language.
+SQLite is public domain, but not "open-contribution", with the website stating "the project does not accept patches from people who have not submitted an affidavit dedicating their contribution into the public domain." Instead of a code of conduct, the founders have adopted a code of ethics based on chapter 4 of the Rule of St. Benedict.
+A standalone command-line shell program called sqlite3 is provided in SQLite's distribution. It can be used to create a database, define tables, insert and change rows, run queries and manage an SQLite database file. It also serves as an example for writing applications that use the SQLite library.
+SQLite uses automated regression testing prior to each release. Over 2 million tests are run as part of a release's verification. The SQLite library has 156,000 lines of source code, while all the test suites combined add up to 92 million lines of test code. SQLite's tests simulate a number of exceptional scenarios, such as power loss and I/O errors, in addition to testing the library's functionality. Starting with the August 10, 2009 release of SQLite 3.6.17, SQLite releases have 100% branch test coverage, one of the components of code coverage. SQLite has four different test harnesses: the original public-domain TCL tests, the proprietary C-language TH3 test suite, the SQL Logic Tests, which check SQLite against other SQL databases, and the dbsqlfuzz proprietary fuzzing engine.
+
+
+== Notable uses ==
+
+
+=== Operating systems ===
+SQLite is included by default in:
+
+Android
+BlackBerry Tablet OS
+iOS
+Mac OS X 10.4 onwards (Apple adopted it as an option in macOS's Core Data API from the original implementation)
+NetBSD
+NixOS where it is used by the Nix core package management system
+RPM based Linux distributions (including Red Hat Enterprise Linux and its derivative Fedora Linux), where it is used by the core package management system
+Windows 10 onwards
+
+
+=== Middleware ===
+ADO.NET adapter, initially developed by Robert Simpson, is maintained jointly with the SQLite developers since April 2010.
+ODBC driver has been developed and is maintained separately by Christian Werner. Werner's ODBC driver is the recommended connection method for accessing SQLite from OpenOffice.org.
+COM (ActiveX) wrapper making SQLite accessible on Windows to scripted languages such as JScript and VBScript. This adds SQLite database capabilities to HTML Applications (HTA).
+
+
+=== Web browsers ===
+The browsers Google Chrome, Opera, Safari and the Android Browser all allow for storing information in, and retrieving it from, an SQLite database within the browser, using the official SQLite Wasm (WebAssembly) build, or using the Web SQL Database technology, although the latter is becoming deprecated (namely superseded by SQLite Wasm or by IndexedDB). Internally, Chromium based browsers use SQLite databases for storing configuration data like site visit history, cookies, download history etc.
+Mozilla Firefox and Mozilla Thunderbird store a variety of configuration data (bookmarks, cookies, contacts etc.) in internally managed SQLite databases. Until Firefox version 57 ("Firefox Quantum"), there was a third-party add-on that used the API supporting this functionality to provide a user interface for managing arbitrary SQLite databases.
+Several third-party add-ons can make use of JavaScript APIs to manage SQLite databases.
+
+
+=== Web application frameworks ===
+Symfony
+Laravel
+Bugzilla
+Django's default database management system
+Drupal
+Trac
+Ruby on Rails's default database management system
+web2py
+
+
+=== Others ===
+Adobe Systems uses SQLite as its file format in Adobe Lightroom, a standard database in Adobe AIR, and internally within Adobe Acrobat Reader.
+Apple Photos uses SQLite internally.
+Audacity uses SQLite as its file format, as of version 3.0.0.
+Evernote uses SQLite to store its local database repository in Windows.
+Skype
+WhatsApp
+The Service Management Facility, used for service management within the Solaris and OpenSolaris operating systems
+Dropbox client software
+Intuit uses SQLite in QuickBooks and TurboTax
+McAfee Antivirus
+Flame (malware)
+BMW iDrive satellite navigation system
+TomTom GPS systems, for the NDS map data
+Proxmox VE - Proxmox Cluster File System (pmxcfs)
+Bentley Systems MicroStation
+Bosch car multimedia systems
+Airbus A350 flight system
+Quicken Essentials and later versions of Quicken for Mac
+Python standard library
+Xojo IDE
+Wine
+
+
+== See also ==
+
+Ordered key–value store
+Comparison of relational database management systems
+List of public domain projects
+List of relational database management systems
+MySQL
+SpatiaLite
+
+
+== Notes ==
+
+
+== References ==
+
+
+=== Citations ===
+
+
+=== Sources ===
+
+
+== Further reading ==
+Gaffney, Kevin P; Prammer, Martin; Brasfield, Larry; Hipp, D Richard; Kennedy, Dan; Patel, Jignesh M (2022-08-01). "SQLite: past, present, and future". Proceedings of the VLDB Endowment. 15 (12): 3535–3547. doi:10.14778/3554821.3554842.
+
+
+== External links ==
+
+Official website 
+"The Untold Story of SQLite". CoRecursive.

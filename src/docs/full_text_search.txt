@@ -1,0 +1,64 @@
+Full-text search
+
+Source: https://en.wikipedia.org/wiki/Full-text_search (CC BY-SA 4.0)
+
+In text retrieval, full-text search refers to a set of techniques for searching a single computer-stored document or a collection in a full-text database. Full-text search is distinguished from searches based on metadata or on specific parts of documents, such as titles, abstracts, selected sections, or bibliographical references.
+In a full-text search, a search engine examines the words in stored documents to find matches for user queries. Full-text-search techniques began to appear in the 1960s (for example, IBM STAIRS in 1969), and became common in online bibliographic databases during the 1990s. Many websites and application programs, including word processors, implement full-text search functionality. Some web search engines, such as the former AltaVista, indexed the full text of web pages, while others indexed only selected portions of pages.
+
+
+== Indexing ==
+When dealing with a small number of documents, a full-text-search engine can scan the contents of each document directly for every query, a strategy known as "serial scanning." Some tools, such as grep, operate in this way.
+When the number of documents or queries is large, full-text search is typically divided into two tasks: indexing and searching. During indexing, the engine scans all documents and builds a list of search terms, often called an index, or more precisely, a concordance. During the search stage, queries are performed against the index rather than the original documents.
+The indexer records each term found in a document and may note its position within the text. Common words, known as stop words (for instance, "the" or "and"), are omitted because they add little value to search results. Some indexers also perform stemming, which reduces words to their base form; for example, "drives", "drove", and "driven" may all be indexed under the concept word "drive."
+
+
+== The precision vs. recall tradeoff ==
+
+Precision and recall are standard measures for search effectiveness. Recall quantifies the proportion of relevant results returned by a search, while precision measures the proportion of returned results that are relevant. Formally, recall is the ratio of relevant results returned to the total number of relevant results available, and precision is the ratio of the number of relevant results returned to the total number of results returned.
+The diagram at the right illustrates a search with low recall and low precision. In the diagram, red and green dots represent the total population of potential search results for a given query, with green dots indicating relevant results and red indicating irrelevant results. Relevance is indicated by proximity to the center of the inner circle. The results actually returned by the search are highlighted on a light-blue background. In the example, only one relevant result of three possible relevant results was returned, giving a recall of ⅓ (33%). The precision is 1/4 (25%), since only one of the four results returned was relevant.
+Due to the ambiguities of natural language, full-text-search systems typically include features such as filtering to increase precision and stemming to increase recall. Controlled-vocabulary search can also help alleviate low-precision results by tagging documents to reduce ambiguity. There is generally a trade-off between precision and recall: increasing precision can reduce overall recall, while increasing recall may lower precision.
+
+
+== False-positive problem ==
+Full-text search can retrieve many documents that are not relevant to the intended query. Such documents are called false positives (see Type I error). The retrieval of irrelevant documents is often caused by the inherent ambiguity of natural language. In the accompanying diagram, false positives are represented by irrelevant results (red dots) that were returned by the search (highlighted on a light-blue background).
+Clustering techniques, often based on Bayesian algorithms, can help reduce false positives. For example, for a search term such as "bank", clustering can categorize documents into groups such as "financial institution", "place to sit", or "place to store." Depending on the occurrence of words relevant to these categories, a search term or a search result can be assigned to one or more categories. This approach is widely used in the e-discovery domain.
+
+
+== Synonym problem ==
+At a basic level, search engines return items that contain the exact phrase listed in the query. Tools and methodologies exist to account for grammatical or typographical errors and to refine results; however, these techniques still typically require a close textual match. Because there are often multiple ways to refer to an entity or concept, full-text search may fail to retrieve an item if the exact term is not used in the query. 
+Not to be confused with semantic search, synonyms can be retrieved by creating an index of related terms, such that when a variation of a word is searched, items containing any of the related terms may also be returned. 
+
+
+== Performance improvements ==
+The limitations of full-text searching have been addressed in two ways: by providing users with tools to express search questions more precisely, and by developing algorithms that improve retrieval precision.
+
+
+=== Improved querying tools ===
+Keywords and synonym search, or query expansion: A technique in which document creators (or trained indexers) supply lists of words that describe the subject of a text, including synonyms. Keywords improve recall, especially when the search term does not appear explicitly in the text.
+Field-restricted search: Some search engines allow users to limit searches to specific fields within a stored data record, such as "Title" or "Author."
+Boolean queries: Searches using Boolean operators (for example, "encyclopedia" AND "online" NOT "Encarta") can increase precision. The AND operator retrieves only documents containing all specified terms;  NOT excludes documents containing a term. The OR operator can be used to increase recall, for instance, "encyclopedia" AND "online" OR "Internet" NOT "Encarta." Using Boolean queries will retrieve documents about online encyclopedias that use the term "Internet" instead of "online." This to increase precision may sometimes reduce recall significantly.
+Phrase search: Matches documents containing an exact sequence of words, such as "Wikipedia, the free encyclopedia."
+Concept search: Matches multi-word concepts, for example compound term processing. This approach is increasingly used in e-discovery solutions.
+Concordance search: Produces an alphabetical list of all principal words that occur in a text along with their immediate context.
+Proximity search:  Retrieves documents in which two or more words occur within a specified distance, for example "Wikipedia" WITHIN2 "free" retrieves documents where "Wikipedia" and "free" are separated by at most two words.
+Regular expression search:  Uses a complex but powerful syntax to specify precise retrieval conditions.
+Fuzzy search: Retrieves documents that match the query terms approximately, allowing for variations such as edit distance.
+Wildcard search: Substitutes one or more characters in a query with a wildcard symbol (e.g., *). For example, "s*n" matches "sin", "son", or "sun."
+
+
+== Software ==
+The following is a partial list of software products that support full-text indexing and search. Some of these are accompanied by documentation describing their architecture or algorithms, which may provide additional insight into how full-text search is implemented.
+
+
+== References ==
+
+
+== See also ==
+Pattern matching and string matching
+Compound term processing
+Enterprise search
+Information extraction
+Information retrieval
+Faceted search
+WebCrawler, first FTS engine
+Search engine indexing - how search engines generate indices to support full-text searching

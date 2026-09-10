@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# FAISS index and chunks
+*.faiss
+index.faiss
+*.pkl
+chunks.pkl
+*.db
+fts.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+config.local.py
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+2026-09-05-llm-tool-telemetry.md
