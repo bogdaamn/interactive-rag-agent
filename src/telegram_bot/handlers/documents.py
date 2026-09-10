@@ -21,11 +21,23 @@ async def handle_document(message, store) -> None:
     downloaded = await message.bot.download_file(file.file_path)
     raw_bytes = downloaded.read()
 
+    progress_message = await message.answer("⏳ Starting...")
+
+    async def on_progress(text: str) -> None:
+        try:
+            await progress_message.edit_text(text)
+        except Exception as exc:
+            # Telegram rejects an unchanged-text edit and rate-limits rapid
+            # edits (error category #10). A progress update is cosmetic — never
+            # let it abort the actual indexing work.
+            logger.warning("Could not update progress message: %s", exc)
+
     result = await ingest_document_async(
         store,
         message.from_user.id,
         message.document.file_name,
         raw_bytes,
+        on_progress,
     )
     logger.info(
         "Indexed %s for user %s (%s chunks)",

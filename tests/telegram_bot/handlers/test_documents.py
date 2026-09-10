@@ -90,3 +90,68 @@ async def test_handle_document_passes_the_senders_user_id_to_the_pipeline(monkey
     assert seen["user_id"] == 555
     assert seen["filename"] == "handbook.pdf"
     assert seen["raw_bytes"] == b"pdf bytes"
+
+
+@pytest.mark.asyncio
+async def test_handle_document_edits_one_progress_message_per_stage(monkeypatch):
+    import telegram_bot.handlers.documents as documents_module
+
+    async def fake_ingest(store, user_id, filename, raw_bytes, on_progress=None):
+        for stage in [
+            "⏳ Extracting text...",
+            "✅ Text extracted",
+            "⏳ Creating chunks...",
+            "✅ 127 chunks created",
+            "⏳ Generating embeddings...",
+            "✅ Embeddings generated",
+        ]:
+            await on_progress(stage)
+        return type("R", (), {"document_id": 1, "filename": filename, "chunk_count": 127})()
+
+    monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
+
+    message = FakeMessage()
+    await handle_document(message, store=None)
+
+    edits = [text for kind, text in message.sent if kind == "edit"]
+    assert "✅ 127 chunks created" in edits
+    assert "✅ Embeddings generated" in edits
+
+    # exactly one message is *sent* for progress (then edited repeatedly) —
+    # six separate sends would flood the chat
+    answers = [text for kind, text in message.sent if kind == "answer"]
+    progress_answers = [t for t in answers if t.startswith("⏳") or t.startswith("✅ Text")]
+    assert len(progress_answers) <= 1
+
+
+@pytest.mark.asyncio
+async def test_handle_document_survives_a_failed_progress_edit(monkeypatch):
+    """Telegram rejects an edit whose text is unchanged, and rate-limits rapid
+    edits. A failed progress update must not abort the upload (error category
+    #10) — the document still gets indexed and the user still gets READY."""
+    import telegram_bot.handlers.documents as documents_module
+
+    class FlakyMessage(FakeMessage):
+        async def answer(self, text):
+            self.sent.append(("answer", text))
+            outer = self
+
+            class FlakySent:
+                async def edit_text(self, text):
+                    outer.sent.append(("edit-failed", text))
+                    raise RuntimeError("Bad Request: message is not modified")
+
+            return FlakySent()
+
+    async def fake_ingest(store, user_id, filename, raw_bytes, on_progress=None):
+        await on_progress("⏳ Extracting text...")
+        await on_progress("✅ Text extracted")
+        return type("R", (), {"document_id": 1, "filename": filename, "chunk_count": 2})()
+
+    monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
+
+    message = FlakyMessage()
+    await handle_document(message, store=None)
+
+    answers = [text for kind, text in message.sent if kind == "answer"]
+    assert READY_MESSAGE in answers
