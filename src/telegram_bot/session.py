@@ -28,9 +28,20 @@ CREATE INDEX IF NOT EXISTS idx_conversation_messages_user_id
 
 
 class Session:
+    """One user's conversation.
+
+    Persisted history holds only the conversational turns (user/assistant), so
+    the database doesn't accumulate per-call scaffolding and a follow-up
+    question sees clean prior context. The tool-call messages of the turn
+    currently in flight are held in `_pending` and discarded when the next user
+    message arrives — the agent loop needs them within a turn, but they're
+    noise across turns.
+    """
+
     def __init__(self, conn: sqlite3.Connection, user_id: int):
         self._conn = conn
         self._user_id = user_id
+        self._pending: list = []
 
     def _append(self, role: str, content: str) -> None:
         try:
@@ -45,13 +56,22 @@ class Session:
             raise SQLiteStoreError(f"Failed to append {role} message: {exc}") from exc
 
     def append_user_message(self, text: str) -> None:
+        self._pending = []  # a new question starts a new turn
         self._append("user", text)
 
     def append_assistant_message(self, text: str) -> None:
         self._append("assistant", text)
 
+    def append_tool_result(self, call: dict, result: str) -> None:
+        """In-memory only. The assistant/tool pairing is required by Ollama's
+        chat format: a tool message must answer a preceding assistant message
+        that carried the matching tool_calls."""
+        self._pending.append({"role": "assistant", "content": "", "tool_calls": [call]})
+        self._pending.append({"role": "tool", "content": result})
+
     def messages(self) -> list:
-        """The most recent CONVERSATION_HISTORY_TURNS turns, oldest first.
+        """The most recent CONVERSATION_HISTORY_TURNS persisted turns (oldest
+        first), followed by this turn's in-flight tool messages.
 
         Bounded so a long conversation doesn't grow every prompt without limit
         (spec §12). Fetched newest-first with a LIMIT — cheaper than reading the
@@ -67,7 +87,8 @@ class Session:
             ).fetchall()
         except sqlite3.Error as exc:
             raise SQLiteStoreError(f"Failed to read conversation history: {exc}") from exc
-        return [{"role": role, "content": content} for role, content in reversed(rows)]
+        persisted = [{"role": role, "content": content} for role, content in reversed(rows)]
+        return persisted + list(self._pending)
 
 
 class SessionStore:

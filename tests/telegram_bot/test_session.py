@@ -112,3 +112,68 @@ def test_messages_window_does_not_truncate_a_short_history(tmp_path):
 
     assert len(session.messages()) == 2
     store.close()
+
+
+_CALL = {"function": {"name": "search_documents", "arguments": {"query": "vacation"}}}
+
+
+def test_append_tool_result_makes_the_result_visible_to_the_next_llm_call(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+    session = store.get_or_create(user_id=1)
+
+    session.append_user_message("How many vacation days?")
+    session.append_tool_result(_CALL, "[Source: policy.pdf, page 3]\n25 days")
+
+    contents = [m["content"] for m in session.messages()]
+    assert any("25 days" in c for c in contents)
+    store.close()
+
+
+def test_append_tool_result_pairs_each_tool_message_with_an_assistant_tool_call(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+    session = store.get_or_create(user_id=1)
+
+    session.append_user_message("How many vacation days?")
+    session.append_tool_result(_CALL, "25 days")
+
+    messages = session.messages()
+    tool_index = next(i for i, m in enumerate(messages) if m["role"] == "tool")
+    preceding = messages[tool_index - 1]
+    assert preceding["role"] == "assistant"
+    assert preceding["tool_calls"] == [_CALL]
+    store.close()
+
+
+def test_tool_messages_are_not_persisted(tmp_path):
+    db_path = str(tmp_path / "test.db")
+
+    store = SessionStore(db_path)
+    session = store.get_or_create(user_id=1)
+    session.append_user_message("How many vacation days?")
+    session.append_tool_result(_CALL, "25 days")
+    session.append_assistant_message("You get 25 days. Source: policy.pdf")
+    store.close()
+
+    store2 = SessionStore(db_path)
+    roles = [m["role"] for m in store2.get_or_create(user_id=1).messages()]
+    assert roles == ["user", "assistant"]
+    assert "tool" not in roles
+    store2.close()
+
+
+def test_append_user_message_clears_the_previous_turns_tool_messages(tmp_path):
+    store = SessionStore(str(tmp_path / "test.db"))
+    session = store.get_or_create(user_id=1)
+
+    session.append_user_message("How many vacation days?")
+    session.append_tool_result(_CALL, "stale tool output from turn one")
+    session.append_assistant_message("25 days.")
+
+    session.append_user_message("Can I carry them over?")
+
+    contents = [m["content"] for m in session.messages()]
+    assert not any("stale tool output" in c for c in contents)
+    # ...but the conversational turn itself is still there, which is the whole
+    # point of conversation-aware RAG
+    assert any("25 days." in c for c in contents)
+    store.close()
