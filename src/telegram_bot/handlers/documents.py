@@ -6,6 +6,7 @@ scenario and must not be reworded.
 
 import logging
 
+from telegram_bot.errors import INGEST_ERRORS, message_for
 from userdocs.pipeline import ingest_document_async
 
 logger = logging.getLogger(__name__)
@@ -32,13 +33,24 @@ async def handle_document(message, store) -> None:
             # let it abort the actual indexing work.
             logger.warning("Could not update progress message: %s", exc)
 
-    result = await ingest_document_async(
-        store,
-        message.from_user.id,
-        message.document.file_name,
-        raw_bytes,
-        on_progress,
-    )
+    try:
+        result = await ingest_document_async(
+            store,
+            message.from_user.id,
+            message.document.file_name,
+            raw_bytes,
+            on_progress,
+        )
+    except INGEST_ERRORS as exc:
+        logger.warning(
+            "Ingestion failed for user %s, file %s: %s",
+            message.from_user.id,
+            message.document.file_name,
+            exc,
+        )
+        await message.answer(message_for(exc))
+        return
+
     logger.info(
         "Indexed %s for user %s (%s chunks)",
         result.filename,

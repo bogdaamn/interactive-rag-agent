@@ -155,3 +155,43 @@ async def test_handle_document_survives_a_failed_progress_edit(monkeypatch):
 
     answers = [text for kind, text in message.sent if kind == "answer"]
     assert READY_MESSAGE in answers
+
+
+from telegram_bot.errors import ERROR_MESSAGES
+from userdocs.errors import (
+    CorruptDocumentError,
+    DocumentTooLargeError,
+    EmbeddingError,
+    EmptyDocumentError,
+    SQLiteStoreError,
+    UnsupportedFormatError,
+)
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        UnsupportedFormatError,
+        CorruptDocumentError,
+        EmptyDocumentError,
+        DocumentTooLargeError,
+        EmbeddingError,
+        SQLiteStoreError,
+    ],
+)
+@pytest.mark.asyncio
+async def test_handle_document_replies_with_the_mapped_message_on_each_error(monkeypatch, error_type):
+    import telegram_bot.handlers.documents as documents_module
+
+    async def failing_ingest(store, user_id, filename, raw_bytes, on_progress=None):
+        raise error_type("internal detail that must not reach the user")
+
+    monkeypatch.setattr(documents_module, "ingest_document_async", failing_ingest)
+
+    message = FakeMessage()
+    await handle_document(message, store=None)
+
+    answers = [text for kind, text in message.sent if kind == "answer"]
+    assert ERROR_MESSAGES[error_type] in answers
+    assert READY_MESSAGE not in answers
+    assert not any("internal detail" in text for text in answers)
