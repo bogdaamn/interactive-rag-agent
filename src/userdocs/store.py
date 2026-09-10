@@ -66,5 +66,27 @@ class UserDocsStore:
         except sqlite3.Error as exc:
             raise SQLiteStoreError(f"Failed to insert document: {exc}") from exc
 
+    def insert_chunks_with_vectors(self, document_id: int, chunks: list, vectors) -> None:
+        if len(chunks) != vectors.shape[0]:
+            raise ValueError(
+                f"chunks length ({len(chunks)}) != vectors row count ({vectors.shape[0]})"
+            )
+        try:
+            for chunk, vector in zip(chunks, vectors):
+                cursor = self._conn.execute(
+                    "INSERT INTO chunks (document_id, chunk_index, text, page) "
+                    "VALUES (?, ?, ?, ?)",
+                    (document_id, chunk["chunk_index"], chunk["text"], chunk["page"]),
+                )
+                chunk_id = cursor.lastrowid
+                self._conn.execute(
+                    "INSERT INTO chunk_vectors (rowid, embedding) VALUES (?, ?)",
+                    (chunk_id, sqlite_vec.serialize_float32(vector.tolist())),
+                )
+            self._conn.commit()
+        except sqlite3.Error as exc:
+            self._conn.rollback()
+            raise SQLiteStoreError(f"Failed to insert chunks/vectors: {exc}") from exc
+
     def close(self) -> None:
         self._conn.close()
