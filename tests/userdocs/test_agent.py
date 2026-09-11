@@ -109,3 +109,9 @@ def test_system_prompt_instructs_against_answering_from_general_knowledge():
     lowered = SYSTEM_PROMPT.lower()
     assert "general knowledge" in lowered
     assert "search_documents" in lowered
+
+
+def test_system_prompt_lists_the_bot_commands():
+    lowered = SYSTEM_PROMPT.lower()
+    assert "/documents" in lowered
+    assert "/delete" in lowered

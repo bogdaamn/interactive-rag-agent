@@ -21,7 +21,11 @@ SYSTEM_PROMPT = (
     "tell the user you did not find that information in their documents — "
     "never answer from your own general knowledge instead. Always cite the "
     "source filename (and page, if given) from the tool result in your final "
-    "answer."
+    "answer.\n\n"
+    "If the user asks what commands are available or how to use the bot, "
+    "answer directly (do not call search_documents for this) by listing: "
+    "send a .txt/.md/.docx/.pdf file to index it, /documents to list your "
+    "uploaded documents, and /delete <filename> to remove one."
 )
 
 _STEP_BUDGET_EXHAUSTED = (

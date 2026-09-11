@@ -539,9 +539,28 @@ from a user-B call — `tests/userdocs/test_store.py`,
 
 ```bash
 cp .env.example .env        # then set TELEGRAM_BOT_TOKEN
-pip install -r requirements.txt
-python src/telegram_bot/main.py
+python3 -m venv .venv && .venv/bin/pip install -r src/requirements.txt
+
+./scripts/start.sh          # background daemon: starts Ollama, warms up the
+                             # model, launches the bot, writes bot.log/.bot.pid
+./scripts/stop.sh           # stops the bot and Ollama
 ```
+
+`start.sh`/`stop.sh` follow the same convention as the sibling `telegram-bot`
+and `local-rag-mcp` projects — see the comments at the top of each script.
+If a `start <target>` / `stop <target>` shell function is set up (see
+`~/.zshrc`), use `start interactive-rag` / `stop interactive-rag` instead.
+
+To run it in the foreground for debugging instead (Ctrl+C to stop):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m telegram_bot.main
+```
+
+Note: `python src/telegram_bot/main.py` does **not** work directly — the
+package's imports (`telegram_bot.*`, `userdocs.*`) resolve relative to `src/`,
+so it must be run as a module with `src/` on `PYTHONPATH` (which is what both
+`scripts/start.sh` and pytest's `pythonpath = src` setting already do).
 
 Commands: send a `.txt`/`.md`/`.docx`/`.pdf` file to index it, then ask
 questions. `/documents` lists your documents, `/delete <filename>` removes one.
