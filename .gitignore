@@ -226,6 +226,9 @@ datasets/
 docs/_build/
 site/
 
+# Superpowers implementation plans — working notes, not project docs
+docs/superpowers/plans/
+
 # MacOS
 .AppleDouble
 .LSOverride

@@ -371,7 +371,6 @@ documented above — that one answers questions about a fixed corpus with FAISS;
 this one indexes per-user uploads into SQLite + sqlite-vec.
 
 Design spec: [`spec/v3/SPEC.md`](spec/v3/SPEC.md).
-Implementation plans: [`docs/superpowers/plans/2026-09-10-*`](docs/superpowers/plans/).
 
 ### Architecture
 
