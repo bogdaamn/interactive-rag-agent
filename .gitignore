@@ -169,9 +169,11 @@ chunks.pkl
 *.db
 fts.db
 
-# local-rag start/stop script state (Ollama pid/log)
+# start/stop script state (Ollama + bot pid/log)
 .ollama.pid
 ollama.log
+.bot.pid
+bot.log
 
 # Model files (if storing locally)
 *.bin
@@ -216,9 +218,16 @@ datasets/
 *.json
 *.parquet
 
+# ...but the RAG evaluation dataset is a small, version-controlled fixture, not
+# generated/large data output.
+!eval/userdocs_eval.json
+
 # Documentation build
 docs/_build/
 site/
+
+# Superpowers implementation plans — working notes, not project docs
+docs/superpowers/plans/
 
 # MacOS
 .AppleDouble

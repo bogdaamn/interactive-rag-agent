@@ -362,3 +362,216 @@ cat config.py
 - **Transformers**: huggingface.co
 
 **Thank You!**
+
+## User documents RAG (Telegram)
+
+A second, independent RAG subsystem: users send documents to a Telegram bot and
+ask questions about them. Separate from the company-knowledge-base assistant
+documented above — that one answers questions about a fixed corpus with FAISS;
+this one indexes per-user uploads into SQLite + sqlite-vec.
+
+Design spec: [`spec/v3/SPEC.md`](spec/v3/SPEC.md).
+
+### Architecture
+
+```text
+Telegram
+   ↓
+Agent (multi-step tool-use loop, src/userdocs/agent.py)
+   ↓  search_documents(query)
+RAG (src/userdocs/retrieve.py — vector + keyword search, RRF fusion, rerank)
+   ↓
+SQLite + sqlite-vec (src/userdocs/store.py)
+```
+
+Upload path: Telegram document → download → `extract.py` → `chunk.py` →
+`embed.py` → `store.py`, orchestrated by `pipeline.py::ingest_document` with
+progress callbacks.
+
+Query path: the agent sees `search_documents` in its tool schema on every turn
+and decides for itself whether to call it. The retrieval result is fed back into
+the conversation and the model composes the final answer from it — retrieved
+text is never injected unconditionally into a system prompt.
+
+### Chunking
+
+- **Chunk size:** 500 tokens (`tiktoken`, `cl100k_base`)
+- **Overlap:** 75 tokens (~15%)
+
+Chosen because uploaded policy documents tend to have short, self-contained
+sections. A window this size rarely mixes two unrelated clauses into one chunk,
+which matters because a chunk is the unit of source attribution — a chunk
+spanning two topics produces a citation that's technically correct and
+practically misleading. The overlap keeps a sentence that carries the actual
+answer from being split across a boundary.
+
+Failure modes at the extremes: chunks that are **too small** (say under 100
+tokens) lose the surrounding context the model needs to phrase a correct answer,
+and produce embeddings dominated by whichever few words happen to be present;
+chunks that are **too large** (over ~1500 tokens) average too many topics into
+one vector, so the nearest-neighbour search becomes less discriminating and
+Top-K fills up with broadly-related-but-not-answering passages.
+
+### Embeddings
+
+- **Model:** `all-MiniLM-L6-v2` (`sentence-transformers`)
+- **Vector size:** 384 dimensions
+- **Why:** runs locally with no API key or per-token cost, is already a
+  dependency of this repo's other pipeline, and is fast enough on CPU to index a
+  multi-hundred-page PDF interactively. Its quality is adequate for
+  document-scale retrieval, which is what this assignment needs — a larger
+  model would cost latency on every upload for a marginal ranking gain that
+  the reranking stage below already recovers.
+
+Vectors are **L2-normalized before storage**. That makes L2 distance monotonic
+with cosine similarity (`L2² = 2 − 2·cos_sim` for unit vectors), which lets the
+whole system use plain L2 KNN without depending on a specific `sqlite-vec`
+version's cosine-metric option, while still reasoning in calibrated cosine
+similarity everywhere above the storage layer.
+
+### Retrieval
+
+- **Distance metric:** L2 over L2-normalized vectors, converted to cosine
+  similarity as `1 − L2²/2` at the storage boundary. Cosine is the right
+  similarity for sentence embeddings (direction carries the meaning, magnitude
+  doesn't), and normalizing at write time buys version-independence.
+- **K:** 5, from a candidate pool of 15 before reranking.
+  Five chunks is enough context for the model to answer and cite without
+  diluting the prompt with marginal matches; the 3× candidate pool gives the
+  reranker something to actually reorder.
+- **Relevance threshold:** 0.30 cosine similarity. Anything
+  below this is treated as "not found" — see Security/Limitations below for why
+  this specific mechanism matters.
+- **Hybrid search:** vector results are fused with FTS5/BM25 keyword results
+  via Reciprocal Rank Fusion (k=60). Keyword search catches exact terms
+  (a policy number, an unusual proper noun) that a 384-dimensional embedding
+  smooths over.
+- **Reranking:** the candidate pool is reordered by a
+  `cross-encoder/ms-marco-MiniLM-L-6-v2` cross-encoder, which reads
+  (question, chunk) as a pair rather than comparing two independently-computed
+  vectors. Reranking only reorders — it never re-admits a chunk that failed the
+  relevance threshold, because a cross-encoder's output is an uncalibrated
+  relevance score, not a cosine similarity.
+
+### Storage
+
+One SQLite database (`userdocs.db`), three tables plus two virtual tables:
+
+```text
+documents            chunks                    chunk_vectors (vec0)
+---------            ------                    --------------------
+id            ←───── document_id               rowid  = chunks.id
+user_id              id  ─────────────────────→ embedding FLOAT[384]
+filename             chunk_index
+file_type            text                      chunks_fts (fts5)
+created_at           page                      ----------
+                                               rowid  = chunks.id
+                                               text
+```
+
+`chunk_vectors.rowid` and `chunks_fts.rowid` are both `chunks.id`, so a search
+result in either index joins straight back to its chunk, its document, and
+therefore its filename and page — the `vector → chunk → document → filename`
+traceability the assignment requires, with no separate mapping table.
+
+`conversation_messages(user_id, role, content, created_at)` lives in the same
+file and holds the conversation history used for follow-up questions.
+
+`chunks.document_id` has `ON DELETE CASCADE` and `PRAGMA foreign_keys = ON` is
+set on every connection, so deleting a document removes its chunks. The two
+virtual tables aren't reached by that cascade (vec0/fts5 tables don't support
+foreign keys), so `delete_document` deletes from them explicitly — a dedicated
+test covers this, since an orphaned vector would keep a "deleted" document
+answering questions.
+
+### Security
+
+Per-user isolation is enforced at three independent layers, so no single change
+can silently break it:
+
+1. **Storage.** `search_vectors` and `search_fts` never query the vector or
+   keyword index for all users. Each first resolves
+   `user_id → documents → chunks`, then filters results to that chunk-id set.
+   `delete_document` matches on `(user_id, filename)`, so two users can have a
+   same-named file and neither can delete the other's.
+2. **Agent.** The `search_documents` tool is built fresh per incoming message
+   with the sender's `user_id` captured in a closure. The tool schema the LLM
+   sees has exactly one parameter, `query` — there is no `user_id` argument for
+   a model to fill in, guess, or be talked into changing.
+3. **Conversation history.** `Session` is keyed by `user_id` and every read
+   filters on it, so one user's prior turns can never appear in another's
+   prompt.
+
+Each layer has a dedicated negative test asserting user A's data is unreachable
+from a user-B call — `tests/userdocs/test_store.py`,
+`tests/userdocs/test_textsearch.py`, `tests/userdocs/test_pipeline_e2e.py`, and
+`tests/telegram_bot/test_session.py`.
+
+### Limitations
+
+- **Grounding is enforced by a similarity threshold, not a proof.** If nothing
+  clears 0.30 cosine similarity, the tool returns "no relevant
+  information found" and the system prompt instructs the model to say so. But a
+  chunk that *does* clear the threshold and is still not a real answer can
+  still be reasoned over — the threshold reduces hallucination risk, it doesn't
+  eliminate it. The threshold value itself is tuned against this repo's small
+  fixture corpus and would want retuning against a real document set.
+- **`.docx` files get no page numbers.** `python-docx` exposes paragraphs, not
+  rendered pages; real page breaks would need a layout engine. Only PDFs get
+  page-level attribution.
+- **Chunk-boundary page attribution is approximate.** A chunk spanning a page
+  break is credited to the page its first token came from.
+- **Vector search over-fetches then filters in Python.** `sqlite-vec` (at the
+  pinned version) has no "restrict KNN to this rowid set" filter, so the
+  per-user narrowing happens after the KNN call. Correct, but it scales with
+  total corpus size rather than the requesting user's corpus size.
+- **20 MB upload cap**, matching Telegram's own bot download limit without a
+  local Bot API server.
+- **No retry on LLM timeout.** The user is told to try again; nothing retries
+  automatically.
+- **Single-process only.** Concurrency safety is whatever SQLite's file locking
+  provides; there's no connection pool or writer queue.
+- **Conversation history is bounded to 3 turns**, so
+  a follow-up that depends on something said much earlier won't resolve.
+
+### Running it
+
+```bash
+cp .env.example .env        # then set TELEGRAM_BOT_TOKEN
+python3 -m venv .venv && .venv/bin/pip install -r src/requirements.txt
+
+./scripts/start.sh          # background daemon: starts Ollama, warms up the
+                             # model, launches the bot, writes bot.log/.bot.pid
+./scripts/stop.sh           # stops the bot and Ollama
+```
+
+`start.sh`/`stop.sh` follow the same convention as the sibling `telegram-bot`
+and `local-rag-mcp` projects — see the comments at the top of each script.
+If a `start <target>` / `stop <target>` shell function is set up (see
+`~/.zshrc`), use `start interactive-rag` / `stop interactive-rag` instead.
+
+To run it in the foreground for debugging instead (Ctrl+C to stop):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m telegram_bot.main
+```
+
+Note: `python src/telegram_bot/main.py` does **not** work directly — the
+package's imports (`telegram_bot.*`, `userdocs.*`) resolve relative to `src/`,
+so it must be run as a module with `src/` on `PYTHONPATH` (which is what both
+`scripts/start.sh` and pytest's `pythonpath = src` setting already do).
+
+Commands: send a `.txt`/`.md`/`.docx`/`.pdf` file to index it, then ask
+questions. `/documents` lists your documents, `/delete <filename>` removes one.
+
+### Tests and evaluation
+
+```bash
+pytest                       # full suite
+pytest -m "not slow"         # skip the tests that load a real embedding model
+python scripts/run_userdocs_eval.py   # RAG evaluation report
+```
+
+Current state: 198 tests passing (190 with `pytest -m "not slow"`, skipping the
+8 tests that load a real embedding model); the evaluation retrieves the
+expected source document for 6/6 questions.

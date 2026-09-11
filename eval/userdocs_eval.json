@@ -1,0 +1,26 @@
+[
+  {
+    "question": "How many paid vacation days do employees get per year?",
+    "expected_source": "vacation_policy.pdf"
+  },
+  {
+    "question": "Can unused vacation days be carried over to the next year?",
+    "expected_source": "vacation_policy.pdf"
+  },
+  {
+    "question": "What notice period is required when resigning?",
+    "expected_source": "employee_handbook.docx"
+  },
+  {
+    "question": "How many paid sick days are covered per year?",
+    "expected_source": "employee_handbook.docx"
+  },
+  {
+    "question": "Are remote employees eligible for the wellness stipend?",
+    "expected_source": "benefits.md"
+  },
+  {
+    "question": "What are the office opening hours?",
+    "expected_source": "office_info.txt"
+  }
+]
