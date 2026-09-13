@@ -1,5 +1,5 @@
 from userdocs.errors import RerankError
-from userdocs.rerank import rerank
+from userdocs.rerank import rerank, rerank_with_scores
 from userdocs.retrieve import RetrievedChunk
 
 
@@ -60,3 +60,18 @@ def test_rerank_raises_rerank_error_on_model_failure(monkeypatch):
 def test_rerank_empty_candidates_returns_empty_without_loading_model():
     # No monkeypatch: if this touched the model it would try a real download.
     assert rerank("q", []) == []
+
+
+def test_rerank_with_scores_exposes_the_raw_cross_encoder_score(monkeypatch):
+    import userdocs.rerank as rerank_module
+
+    class FakeCrossEncoder:
+        def predict(self, pairs):
+            return [7.16, -5.53]
+
+    monkeypatch.setattr(rerank_module, "_get_model", lambda: FakeCrossEncoder())
+
+    a, b = _chunk("relevant", 0.65), _chunk("irrelevant", 0.44)
+    result = rerank_with_scores("q", [a, b])
+
+    assert result == [(a, 7.16), (b, -5.53)]
