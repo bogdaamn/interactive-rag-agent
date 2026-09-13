@@ -33,10 +33,18 @@ _STEP_BUDGET_EXHAUSTED = (
 )
 
 
-async def run(llm, registry, session, user_text: str, max_steps: int = AGENT_MAX_STEPS) -> str:
+async def run(
+    llm, registry, session, user_text: str, max_steps: int = AGENT_MAX_STEPS, on_llm_usage=None
+) -> str:
     for _ in range(max_steps):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session.messages()
         assistant_message = await llm.chat(messages, tools=registry.schemas())
+
+        if on_llm_usage is not None:
+            on_llm_usage(
+                assistant_message.get("prompt_tokens", 0),
+                assistant_message.get("completion_tokens", 0),
+            )
 
         tool_calls = assistant_message.get("tool_calls") or []
         if not tool_calls:
