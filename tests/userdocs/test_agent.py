@@ -115,6 +115,7 @@ def test_system_prompt_lists_the_bot_commands():
     lowered = SYSTEM_PROMPT.lower()
     assert "/documents" in lowered
     assert "/delete" in lowered
+    assert "/stats" in lowered
 
 
 def test_run_reports_llm_usage_via_callback_once_per_llm_call():

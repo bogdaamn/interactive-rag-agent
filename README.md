@@ -636,6 +636,6 @@ pytest -m "not slow"         # skip the tests that load a real embedding model
 python scripts/run_userdocs_eval.py   # RAG evaluation report
 ```
 
-Current state: 198 tests passing (190 with `pytest -m "not slow"`, skipping the
+Current state: 221 tests passing (213 with `pytest -m "not slow"`, skipping the
 8 tests that load a real embedding model); the evaluation retrieves the
 expected source document for 6/6 questions.

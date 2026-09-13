@@ -25,7 +25,9 @@ SYSTEM_PROMPT = (
     "If the user asks what commands are available or how to use the bot, "
     "answer directly (do not call search_documents for this) by listing: "
     "send a .txt/.md/.docx/.pdf file to index it, /documents to list your "
-    "uploaded documents, and /delete <filename> to remove one."
+    "uploaded documents, /delete <filename> to remove one, and /stats to see "
+    "their usage report — tokens spent, documents indexed, and errors "
+    "encountered."
 )
 
 _STEP_BUDGET_EXHAUSTED = (

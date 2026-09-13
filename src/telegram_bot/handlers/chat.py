@@ -11,6 +11,7 @@ from telegram_bot.errors import message_for
 from telegram_bot.llm_errors import LLMError
 from userdocs.agent import run as agent_run
 from userdocs.config import AGENT_MAX_STEPS
+from userdocs.errors import SQLiteStoreError
 from userdocs.tool_registry import ToolRegistry
 from userdocs.tools import build_search_documents_tool
 
@@ -20,9 +21,6 @@ logger = logging.getLogger(__name__)
 async def handle_text(message, store, llm, sessions, stats) -> None:
     user_id = message.from_user.id
     session = sessions.get_or_create(user_id)
-    session.append_user_message(message.text)
-
-    registry = ToolRegistry([build_search_documents_tool(store, user_id)])
 
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
@@ -31,6 +29,10 @@ async def handle_text(message, store, llm, sessions, stats) -> None:
         usage["completion_tokens"] += completion_tokens
 
     try:
+        session.append_user_message(message.text)
+
+        registry = ToolRegistry([build_search_documents_tool(store, user_id)])
+
         answer = await agent_run(
             llm,
             registry,
@@ -39,12 +41,13 @@ async def handle_text(message, store, llm, sessions, stats) -> None:
             max_steps=AGENT_MAX_STEPS,
             on_llm_usage=_accumulate_usage,
         )
-    except LLMError as exc:
+
+        session.append_assistant_message(answer)
+        stats.record_turn(user_id, usage["prompt_tokens"], usage["completion_tokens"])
+    except (LLMError, SQLiteStoreError) as exc:
         logger.warning("Agent run failed for user %s: %s", user_id, exc)
         stats.record_error(user_id, type(exc).__name__)
         await message.answer(message_for(exc))
         return
 
-    stats.record_turn(user_id, usage["prompt_tokens"], usage["completion_tokens"])
-    session.append_assistant_message(answer)
     await message.answer(answer)

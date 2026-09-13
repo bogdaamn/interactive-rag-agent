@@ -4,6 +4,7 @@ from telegram_bot.errors import ERROR_MESSAGES
 from telegram_bot.handlers.chat import handle_text
 from telegram_bot.llm_errors import LLMError, LLMTimeoutError
 from telegram_bot.stats import UsageStats
+from userdocs.errors import SQLiteStoreError
 
 
 class FakeMessage:
@@ -17,16 +18,21 @@ class FakeMessage:
 
 
 class FakeSession:
-    def __init__(self):
+    def __init__(self, fail_on=None):
         self.appended = []
+        self._fail_on = fail_on
 
     def messages(self):
         return []
 
     def append_user_message(self, text):
+        if self._fail_on == "user":
+            raise SQLiteStoreError("disk full")
         self.appended.append(("user", text))
 
     def append_assistant_message(self, text):
+        if self._fail_on == "assistant":
+            raise SQLiteStoreError("disk full")
         self.appended.append(("assistant", text))
 
     def append_tool_result(self, call, result):
@@ -168,3 +174,50 @@ async def test_handle_text_records_an_error_in_stats_on_llm_failure(monkeypatch)
     await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=stats)
 
     assert stats.snapshot(3).errors == {"LLMError": 1}
+
+
+@pytest.mark.asyncio
+async def test_handle_text_replies_with_the_mapped_message_on_sqlite_failure(monkeypatch):
+    """A DB failure while persisting the user's turn must not leave the user
+    with total silence — it needs the same mapped-message treatment as an
+    LLM failure."""
+    import telegram_bot.handlers.chat as chat_module
+
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        return "25 days."
+
+    monkeypatch.setattr(chat_module, "agent_run", fake_run)
+
+    message = FakeMessage(user_id=3)
+    sessions = FakeSessionStore()
+    sessions.sessions[3] = FakeSession(fail_on="user")
+    stats = UsageStats()
+
+    await handle_text(message, store=None, llm=None, sessions=sessions, stats=stats)
+
+    assert message.sent == [ERROR_MESSAGES[SQLiteStoreError]]
+    assert stats.snapshot(3).errors == {"SQLiteStoreError": 1}
+    assert stats.snapshot(3).turns == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_text_replies_with_the_mapped_message_when_saving_the_answer_fails(monkeypatch):
+    """Same failure mode, but the DB error happens after a successful agent
+    run, while persisting the assistant's reply."""
+    import telegram_bot.handlers.chat as chat_module
+
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        return "25 days."
+
+    monkeypatch.setattr(chat_module, "agent_run", fake_run)
+
+    message = FakeMessage(user_id=3)
+    sessions = FakeSessionStore()
+    sessions.sessions[3] = FakeSession(fail_on="assistant")
+    stats = UsageStats()
+
+    await handle_text(message, store=None, llm=None, sessions=sessions, stats=stats)
+
+    assert message.sent == [ERROR_MESSAGES[SQLiteStoreError]]
+    assert stats.snapshot(3).errors == {"SQLiteStoreError": 1}
+    assert stats.snapshot(3).turns == 0
