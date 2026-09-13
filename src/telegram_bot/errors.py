@@ -29,8 +29,8 @@ ERROR_MESSAGES = {
     ),
     # 2 and 3 (corrupted PDF / corrupted DOCX share one type and one message)
     CorruptDocumentError: (
-        "❌ Не удалось обработать документ.\n\n"
-        "Пожалуйста, убедитесь, что файл не повреждён."
+        "❌ Could not process the document.\n\n"
+        "Please make sure the file isn't corrupted."
     ),
     # 4
     EmptyDocumentError: (

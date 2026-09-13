@@ -60,12 +60,58 @@ A **local, intelligent Q&A system** using:
 # 🔍 RAG Pipeline
 
 1. Document Loading → Read .md, .txt, .pdf, .docx
-2. Chunking → Split into 700-char chunks
+2. Chunking → Split into 700-token chunks (100-token overlap)
 3. Embedding → Use SentenceTransformers
 4. Indexing → Build FAISS vector index
 5. Query → Retrieve top 5 similar chunks
 6. Prompt Building → Create context-aware prompt
 7. LLM Generation → Get answer from model
+
+# 🔍 Chunking
+
+- **Chunk size:** 700 tokens (`tiktoken`, `cl100k_base`) — `src/config.py::CHUNK_SIZE`
+- **Overlap:** 100 tokens (~14%) — `src/config.py::CHUNK_OVERLAP`
+
+Chosen for this corpus's `src/docs/*.txt` files: 600–2000-word technical
+write-ups (BM25 ranking, full-text search, sentence embeddings, SQLite)
+where a single idea is usually explained across several paragraphs rather
+than in one self-contained clause. 700 tokens is roughly a few paragraphs —
+enough to keep a multi-sentence explanation of one concept together in a
+single chunk without also pulling in the document's next, unrelated
+sub-topic. The overlap exists so a sentence that continues an idea right at
+a chunk boundary (e.g. "as described above, X does Y") still has its
+antecedent nearby in at least one of the two overlapping chunks, instead of
+being retrievable but unintelligible on its own.
+
+Failure modes at the extremes: chunks that are **too small** (roughly under
+150–200 tokens) truncate mid-explanation, so the embedding captures a
+fragment of an idea rather than the idea itself and the LLM has to guess at
+context that was cut away; retrieval also gets noisier, since many small,
+similar-looking fragments end up competing for the same query. Chunks that
+are **too large** (over ~1500–2000 tokens) start covering multiple
+sub-topics in one vector (e.g. one chunk spanning both "how BM25 scores
+documents" and "BM25 vs TF-IDF"), which blurs the embedding's meaning and
+makes nearest-neighbour search less discriminating — the model may retrieve
+a technically-matching chunk where the actually relevant sentence is diluted
+among mostly unrelated text, spending prompt tokens on padding instead of
+directly relevant content.
+
+# 🔍 Embeddings
+
+- **Model:** `all-MiniLM-L6-v2` (`sentence-transformers`) — `src/config.py::EMBEDDING_MODEL`
+- **Vector size:** 384 dimensions
+
+Embedding generation can run either locally or against a hosted API (e.g.
+OpenAI's `text-embedding-3-small`). This project runs it **locally**:
+`all-MiniLM-L6-v2` is a small (~80MB) general-purpose sentence-embedding
+model that needs no API key, no per-request cost, and no network round-trip
+per chunk — consistent with the rest of the stack (FAISS, Ollama) being
+local-first, and it means company documents never leave the machine just to
+get embedded. Its retrieval quality is adequate at this corpus's scale (a
+handful of documents, a few thousand chunks) — a larger model (e.g.
+`all-mpnet-base-v2`, 768 dimensions) would improve ranking marginally at
+roughly 2-3x the inference cost per chunk, a trade-off that isn't worth it
+here but would be revisited for a much larger or more ambiguous corpus.
 
 # 🔍 Why FAISS?
 

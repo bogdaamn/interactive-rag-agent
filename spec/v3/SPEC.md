@@ -1119,3 +1119,45 @@ and each has at least one test that fails if the feature regresses.
 11. Telegram-bot reuse scope: tool-loop/registry/LLM-client patterns
     ported/adapted; document upload, storage, and session identity model
     are new (§2).
+
+## 20. Usage/observability stats (added 2026-09-13, post-launch)
+
+Not part of the original assignment brief — added on request, to give the
+user visibility into LLM token consumption and ingestion volume while
+testing the bot. Decisions below were confirmed directly with the user.
+
+**Surface:** a new `/stats` command, per-user (consistent with this
+subsystem's hard per-user isolation elsewhere — no cross-user or global
+view). No footer on every reply; kept opt-in so normal answers aren't
+cluttered.
+
+**Token scope:** summed per *turn* (one user text message → one
+`agent.run()` call), not per individual LLM call. A turn's tool-use loop can
+call `llm.chat()` more than once (initial call, then a follow-up after a
+tool result); `/stats` reports the turn total, matching what the user
+experiences as "one request" rather than exposing the loop's internal call
+count.
+
+**Source of the numbers:** Ollama's `/api/chat` response already returns
+`prompt_eval_count` and `eval_count` (input/output token counts) —
+currently discarded by `OllamaClient.chat()`. No new instrumentation is
+needed, just threading these existing fields through.
+
+**Persistence:** in-memory only, per running process. Resets to zero on
+every bot restart. Chosen over a SQLite table because this is a
+development-time visibility feature, not a product requirement with
+durability expectations — revisit if that changes.
+
+**Tracked per user:**
+- `prompt_tokens`, `completion_tokens` (cumulative, summed across turns)
+- `turns` (count of completed agent turns)
+- `documents_indexed`, `chunks_indexed` (cumulative from ingestion; one
+  vector per chunk, so `chunks_indexed` ≡ vectors created)
+- `errors`: dict of exception class name → count, covering both ingestion
+  errors (§9 categories #1-7) and LLM errors (§9 categories #8-9) — an
+  operational health view alongside the usage numbers.
+
+**Explicitly out of scope for this addition** (may be revisited later):
+retrieval-stage stats (candidate pool size, hybrid search hit breakdown,
+rerank effect), tool-call counts, LLM latency. The user considered these
+and deferred them to keep this addition tightly scoped.
