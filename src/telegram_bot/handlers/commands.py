@@ -16,6 +16,26 @@ logger = logging.getLogger(__name__)
 NO_DOCUMENTS_MESSAGE = "📚 You haven't uploaded any documents yet."
 DELETE_USAGE_MESSAGE = "Usage: /delete <filename>\n\nExample: /delete vacation_policy.pdf"
 
+STATS_HEADER = "📊 Your usage"
+
+
+def _format_stats(stats_snapshot) -> str:
+    lines = [
+        STATS_HEADER,
+        "",
+        f"Turns answered: {stats_snapshot.turns}",
+        f"Tokens used: {stats_snapshot.prompt_tokens + stats_snapshot.completion_tokens} "
+        f"({stats_snapshot.prompt_tokens} prompt / {stats_snapshot.completion_tokens} completion)",
+        f"Documents indexed: {stats_snapshot.documents_indexed}",
+        f"Chunks/vectors created: {stats_snapshot.chunks_indexed}",
+    ]
+    if stats_snapshot.errors:
+        lines.append("")
+        lines.append("Errors encountered:")
+        for category, count in sorted(stats_snapshot.errors.items()):
+            lines.append(f"- {category}: {count}")
+    return "\n".join(lines)
+
 
 async def handle_documents_command(message, store) -> None:
     try:
@@ -52,3 +72,8 @@ async def handle_delete_command(message, store) -> None:
         await message.answer(f"✅ Deleted {filename}.")
     else:
         await message.answer(f"❌ No document named {filename} found.")
+
+
+async def handle_stats_command(message, stats) -> None:
+    snapshot = stats.snapshot(message.from_user.id)
+    await message.answer(_format_stats(snapshot))
