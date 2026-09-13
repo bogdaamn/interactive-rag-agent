@@ -5,6 +5,7 @@ from telegram_bot.handlers.chat import handle_text
 from telegram_bot.llm_errors import LLMError, LLMTimeoutError
 from telegram_bot.stats import UsageStats
 from userdocs.errors import SQLiteStoreError
+from userdocs.retrieve import RetrievedChunk
 
 
 class FakeMessage:
@@ -87,7 +88,7 @@ async def test_handle_text_builds_a_tool_registry_bound_to_the_sender(monkeypatc
 
     seen = {}
 
-    def fake_build_tool(store, user_id):
+    def fake_build_tool(store, user_id, on_sources=None):
         seen["user_id"] = user_id
         return type("T", (), {"name": "search_documents", "schema": lambda self: {}})()
 
@@ -198,6 +199,77 @@ async def test_handle_text_replies_with_the_mapped_message_on_sqlite_failure(mon
     assert message.sent == [ERROR_MESSAGES[SQLiteStoreError]]
     assert stats.snapshot(3).errors == {"SQLiteStoreError": 1}
     assert stats.snapshot(3).turns == 0
+
+
+@pytest.mark.asyncio
+async def test_handle_text_appends_a_citation_footer_when_search_documents_found_something(monkeypatch):
+    import telegram_bot.handlers.chat as chat_module
+
+    chunk = RetrievedChunk(
+        text="irrelevant", filename="vacation_policy.pdf", page=12, chunk_index=0, score=0.9
+    )
+    captured = {}
+
+    def fake_build_tool(store, user_id, on_sources=None):
+        captured["on_sources"] = on_sources
+        return type("T", (), {"name": "search_documents", "schema": lambda self: {}})()
+
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        captured["on_sources"]([chunk])
+        return "You get 25 days."
+
+    monkeypatch.setattr(chat_module, "build_search_documents_tool", fake_build_tool)
+    monkeypatch.setattr(chat_module, "agent_run", fake_run)
+
+    message = FakeMessage(user_id=1)
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=UsageStats())
+
+    assert message.sent == ["You get 25 days.\n\nSource: vacation_policy.pdf, page 12"]
+
+
+@pytest.mark.asyncio
+async def test_handle_text_dedupes_sources_across_multiple_tool_calls_in_one_turn(monkeypatch):
+    import telegram_bot.handlers.chat as chat_module
+
+    chunk_a = RetrievedChunk(
+        text="irrelevant", filename="vacation_policy.pdf", page=12, chunk_index=0, score=0.9
+    )
+    chunk_b = RetrievedChunk(text="irrelevant", filename="benefits.md", page=None, chunk_index=1, score=0.8)
+    captured = {}
+
+    def fake_build_tool(store, user_id, on_sources=None):
+        captured["on_sources"] = on_sources
+        return type("T", (), {"name": "search_documents", "schema": lambda self: {}})()
+
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        captured["on_sources"]([chunk_a])
+        captured["on_sources"]([chunk_a, chunk_b])
+        return "Here you go."
+
+    monkeypatch.setattr(chat_module, "build_search_documents_tool", fake_build_tool)
+    monkeypatch.setattr(chat_module, "agent_run", fake_run)
+
+    message = FakeMessage(user_id=1)
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=UsageStats())
+
+    assert message.sent == [
+        "Here you go.\n\nSource: vacation_policy.pdf, page 12\nSource: benefits.md, chunk #2"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_text_appends_no_footer_when_nothing_was_retrieved(monkeypatch):
+    import telegram_bot.handlers.chat as chat_module
+
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        return "No relevant information found in the user's documents."
+
+    monkeypatch.setattr(chat_module, "agent_run", fake_run)
+
+    message = FakeMessage(user_id=1)
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=UsageStats())
+
+    assert message.sent == ["No relevant information found in the user's documents."]
 
 
 @pytest.mark.asyncio

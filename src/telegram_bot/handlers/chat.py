@@ -1,8 +1,13 @@
-"""Plain-text message handler. See spec/v3/SPEC.md §10.3.
+"""Plain-text message handler. See spec/v3/SPEC.md §10.3, §13.
 
 The tool registry is built fresh per message, with the sender's user_id baked
 into the search_documents closure — the LLM never sees a user_id parameter it
 could change (spec §11.1).
+
+Source attribution is appended here, not left to the LLM's own prose: every
+chunk search_documents actually retrieved this turn is collected via
+on_sources, and a deduped citation footer is appended to the final answer —
+guaranteed correct regardless of what the model says (spec §13).
 """
 
 import logging
@@ -13,7 +18,7 @@ from userdocs.agent import run as agent_run
 from userdocs.config import AGENT_MAX_STEPS
 from userdocs.errors import SQLiteStoreError
 from userdocs.tool_registry import ToolRegistry
-from userdocs.tools import build_search_documents_tool
+from userdocs.tools import build_search_documents_tool, format_citation_footer
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,7 @@ async def handle_text(message, store, llm, sessions, stats) -> None:
     session = sessions.get_or_create(user_id)
 
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    sources = []
 
     def _accumulate_usage(prompt_tokens: int, completion_tokens: int) -> None:
         usage["prompt_tokens"] += prompt_tokens
@@ -31,7 +37,9 @@ async def handle_text(message, store, llm, sessions, stats) -> None:
     try:
         session.append_user_message(message.text)
 
-        registry = ToolRegistry([build_search_documents_tool(store, user_id)])
+        registry = ToolRegistry(
+            [build_search_documents_tool(store, user_id, on_sources=sources.extend)]
+        )
 
         answer = await agent_run(
             llm,
@@ -41,6 +49,9 @@ async def handle_text(message, store, llm, sessions, stats) -> None:
             max_steps=AGENT_MAX_STEPS,
             on_llm_usage=_accumulate_usage,
         )
+
+        if sources:
+            answer = f"{answer}\n\n{format_citation_footer(sources)}"
 
         session.append_assistant_message(answer)
         stats.record_turn(user_id, usage["prompt_tokens"], usage["completion_tokens"])
