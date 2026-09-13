@@ -1,5 +1,22 @@
 # Local RAG/MCP Knowledge Base Assistant
 
+# 🚀 Getting Started
+
+The actively maintained, primary way to run this project is the Telegram bot
+(user-documents RAG) with a single command:
+
+```bash
+./scripts/start.sh    # or: start interactive-rag, if the shell alias is set up
+```
+
+See [User documents RAG (Telegram) → Running it](#running-it) below for full
+setup (env vars, dependencies) — it requires no separate index-building step,
+since documents are indexed on upload rather than from a pre-built corpus.
+
+The sections below (Index Building, Query Processing, Quick Reference, etc.)
+describe the original standalone FAISS/MCP CLI assistant (`src/main.py`) this
+project was forked from; it still works but isn't the primary entry point.
+
 # 📋 The Problem
 
 - **Growing Documentation**: Knowledge scattered across files
@@ -171,7 +188,7 @@ src/
 └── docs/              Documentation
 ```
 
-# 🚀 Index Building (Setup)
+# 🚀 Index Building (Setup, legacy CLI assistant)
 
 ```
 $ python main.py build-index
@@ -222,51 +239,6 @@ CHUNK_OVERLAP = 100
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 OLLAMA_MODEL = "qwen3:0.6b"
 TOP_K = 5
-```
-
-# 🎬 Live Demo - Starting
-
-```bash
-$ python main.py
-```
-
-Output:
-```
-🤖 Company Knowledge Base
-Ask questions about documentation
-Type 'exit' to stop
-```
-
-# 🎬 Demo - Query 1
-
-```
-❓ What are company values?
-
-🤖 Innovation, integrity, collaboration
-
-📚 Sources:
-  • Loan Rangers Team.md
-  • Info Security.md
-```
-
-# 🎬 Demo - Query 2
-
-```
-❓ What documents do we have?
-
-🤖 [Uses MCP list_documents]
-  • Loan Rangers Team.md
-  • Information Security.md
-  • Services.md
-```
-
-# 🎬 Demo - Query 3
-
-```
-❓ Full security policy?
-
-🤖 [Uses MCP read_document]
-[Full document content...]
 ```
 
 # 🔐 Security - Local vs Cloud
@@ -381,18 +353,10 @@ Docs     Index      Build
 | **Cost** | Subscription | One-time |
 | **Speed** | Slow | Sub-second |
 
-# ✅ What You Have Now
-
-- Local privacy-first knowledge base
-- Fast semantic search (FAISS)
-- Intelligent tool use (MCP)
-- Maintainable Python code
-- Foundation for enterprise features
-
-# 🙋 Quick Reference
+# 🙋 Quick Reference (legacy CLI assistant)
 
 ```bash
-# Build index
+# Build index (one-time, before first run of this legacy CLI)
 python main.py build-index
 
 # Run interactively
