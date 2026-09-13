@@ -1,7 +1,11 @@
 import asyncio
 
 from userdocs.retrieve import RetrievedChunk
-from userdocs.tools import NO_RESULTS_MESSAGE, build_search_documents_tool
+from userdocs.tools import (
+    NO_RESULTS_MESSAGE,
+    build_search_documents_tool,
+    format_citation_footer,
+)
 
 
 def test_tool_schema_has_no_user_id_parameter():
@@ -87,3 +91,60 @@ def test_tool_handler_passes_the_bound_user_id_to_retrieve(monkeypatch):
     asyncio.run(tool.handler(query="anything"))
 
     assert seen["user_id"] == 777
+
+
+def test_tool_handler_reports_retrieved_chunks_via_on_sources(monkeypatch):
+    import userdocs.tools as tools_module
+
+    chunk = RetrievedChunk(
+        text="Employees receive 25 vacation days.",
+        filename="vacation_policy.pdf",
+        page=12,
+        chunk_index=37,
+        score=0.88,
+    )
+    monkeypatch.setattr(tools_module, "retrieve", lambda store, user_id, query: [chunk])
+
+    seen = []
+    tool = build_search_documents_tool(store=None, user_id=1, on_sources=seen.append)
+    asyncio.run(tool.handler(query="how many vacation days?"))
+
+    assert seen == [[chunk]]
+
+
+def test_tool_handler_does_not_call_on_sources_when_nothing_relevant(monkeypatch):
+    import userdocs.tools as tools_module
+
+    monkeypatch.setattr(tools_module, "retrieve", lambda store, user_id, query: [])
+
+    seen = []
+    tool = build_search_documents_tool(store=None, user_id=1, on_sources=seen.append)
+    asyncio.run(tool.handler(query="parental leave?"))
+
+    assert seen == []
+
+
+def test_format_citation_footer_uses_page_for_a_pdf_chunk():
+    chunk = RetrievedChunk(
+        text="irrelevant", filename="vacation_policy.pdf", page=12, chunk_index=37, score=0.9
+    )
+
+    assert format_citation_footer([chunk]) == "Source: vacation_policy.pdf, page 12"
+
+
+def test_format_citation_footer_uses_a_1_indexed_chunk_number_without_a_page():
+    chunk = RetrievedChunk(
+        text="irrelevant", filename="benefits.md", page=None, chunk_index=2, score=0.9
+    )
+
+    assert format_citation_footer([chunk]) == "Source: benefits.md, chunk #3"
+
+
+def test_format_citation_footer_dedupes_and_preserves_first_seen_order():
+    a = RetrievedChunk(text="x", filename="a.pdf", page=1, chunk_index=0, score=0.9)
+    b = RetrievedChunk(text="y", filename="b.md", page=None, chunk_index=0, score=0.9)
+    a_again = RetrievedChunk(text="z", filename="a.pdf", page=1, chunk_index=0, score=0.5)
+
+    footer = format_citation_footer([a, b, a_again])
+
+    assert footer == "Source: a.pdf, page 1\nSource: b.md, chunk #1"

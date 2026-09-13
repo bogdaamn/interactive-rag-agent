@@ -1,9 +1,14 @@
 """Multi-step tool-use loop. See spec/v3/SPEC.md §11.2.
 
 Adapted from ../telegram-bot/agent.py (spec §2's reuse table) — the loop shape
-is the same; the system prompt is userdocs-specific and carries two hard
-behavioral requirements from the assignment: always cite the source (§13), and
-never substitute general knowledge for a document lookup (§14).
+is the same; the system prompt is userdocs-specific and carries one hard
+behavioral requirement from the assignment: never substitute general
+knowledge for a document lookup (§14). Source attribution (§13) is
+deliberately *not* asked of the model here — it used to be, but the model
+composing its own "Source: ..." line from the tool's bracketed hint is exactly
+how it invented a wrong filename under pressure in testing. The caller
+(telegram_bot/handlers/chat.py) appends a code-authored, guaranteed-correct
+citation footer instead, so the model is told to just answer the question.
 
 This module deliberately depends only on duck-typed llm/registry/session
 objects, so it can be tested with fakes and reused by any caller (the Telegram
@@ -19,9 +24,9 @@ SYSTEM_PROMPT = (
     "search_documents returns 'No relevant information found in the user's "
     "documents.', or the retrieved text doesn't actually answer the question, "
     "tell the user you did not find that information in their documents — "
-    "never answer from your own general knowledge instead. Always cite the "
-    "source filename (and page, if given) from the tool result in your final "
-    "answer.\n\n"
+    "never answer from your own general knowledge instead. The source "
+    "document is cited automatically after your answer — just answer the "
+    "question, do not state or guess a filename yourself.\n\n"
     "If the user asks what commands are available or how to use the bot, "
     "answer directly (do not call search_documents for this) by listing: "
     "send a .txt/.md/.docx/.pdf file to index it, /documents to list your "
