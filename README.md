@@ -63,7 +63,10 @@ A **local, intelligent Q&A system** using:
 2. Chunking → Split into 700-token chunks (100-token overlap)
 3. Embedding → Use SentenceTransformers
 4. Indexing → Build FAISS vector index
-5. Query → Retrieve top 5 similar chunks
+5. Query → LLM expands the question into alternative phrasings; each is
+   searched by both vector and keyword (FTS5/BM25) search, fused into the
+   final top-5 chunks via two rounds of Reciprocal Rank Fusion
+   (`src/rag/query.py::retrieve`)
 6. Prompt Building → Create context-aware prompt
 7. LLM Generation → Get answer from model
 
@@ -401,7 +404,7 @@ cat config.py
 
 # 📚 Resources
 
-- **Code**: MobilaName/local-rag-mcp
+- **Code**: bogdaamn/interactive-rag-agent
 - **FAISS**: facebook/faiss
 - **Ollama**: ollama.ai
 - **FastMCP**: github.com/jlowin/fastmcp
@@ -482,9 +485,12 @@ similarity everywhere above the storage layer.
   similarity for sentence embeddings (direction carries the meaning, magnitude
   doesn't), and normalizing at write time buys version-independence.
 - **K:** 5, from a candidate pool of 15 before reranking.
-  Five chunks is enough context for the model to answer and cite without
-  diluting the prompt with marginal matches; the 3× candidate pool gives the
-  reranker something to actually reorder.
+  Five chunks is enough context for the model to answer without diluting
+  the prompt with marginal matches; the 3× candidate pool gives the
+  reranker something to actually reorder. Citing the source is no longer
+  the model's job at all — a code-authored citation footer is appended
+  after the answer regardless of what the model says (`tools.py::format_citation_footer`,
+  spec §13).
 - **Relevance threshold:** 0.30 cosine similarity. Anything
   below this is treated as "not found" — see Security/Limitations below for why
   this specific mechanism matters.
@@ -636,6 +642,6 @@ pytest -m "not slow"         # skip the tests that load a real embedding model
 python scripts/run_userdocs_eval.py   # RAG evaluation report
 ```
 
-Current state: 221 tests passing (213 with `pytest -m "not slow"`, skipping the
+Current state: 229 tests passing (221 with `pytest -m "not slow"`, skipping the
 8 tests that load a real embedding model); the evaluation retrieves the
 expected source document for 6/6 questions.

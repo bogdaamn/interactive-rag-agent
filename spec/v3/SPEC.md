@@ -646,14 +646,15 @@ the very top does one final broad catch as a last-resort safety net, §10.1).
 | 7 | Ошибка SQLite | `SQLiteStoreError` | `store.py` (wraps `sqlite3.Error`) | "❌ Something went wrong while saving your document. Please try again." |
 | 8 | Ошибка LLM | `LLMError` (ported from sibling) | `telegram_bot/llm_client.py` | "❌ The assistant is temporarily unavailable. Please try again shortly." |
 | 9 | Timeout | `LLMTimeoutError` (subclass of `LLMError`) | `telegram_bot/llm_client.py` (httpx `ReadTimeout`/`ConnectTimeout`) | "⏳ That took too long — please try again." |
-| 10 | Ошибка Telegram API | caught at the aiogram handler level (`aiogram.exceptions.TelegramAPIError` and subclasses) | `handlers/*.py` | logged only — no reply is sent (there is no channel left to send it on if the Telegram call itself failed); mirrors the sibling's two-tier bulk→per-message degradation pattern (`main.py:224-233`) for the specific case of `/delete` needing to edit/send a confirmation |
+| 10 | Ошибка Telegram API | not a typed exception in this codebase — no `except TelegramAPIError` was actually added anywhere | — | **Updated 2026-09-13 — this row describes the original intent, not what got built.** There is no explicit catch for a Telegram-call failure in `handlers/*.py` (only `documents.py`'s progress-message edit has a narrow `except Exception`, and that's for a different failure mode — a rejected/rate-limited edit). If e.g. `bot.get_file`/`message.answer` itself raised, it would propagate uncaught into aiogram's own dispatcher, which logs it and continues polling — so the bot doesn't crash and no stack trace reaches the user, but the user also gets no reply at all (not a friendly message), and it isn't recorded in `/stats` (§20) the way the other 9 categories are. Verified in conversation, not yet closed as a gap. |
 
 Every category has:
 1. A specific exception type (never a string check on `str(exc)`).
 2. Exactly one place it's caught — the Telegram handler that called into the
    pipeline/agent (`handlers/documents.py` for #1–7, `handlers/chat.py` for
-   #8–9, every handler's outermost `try` for #10) — and turned into the
-   fixed user message from the table, never a raw stack trace.
+   #8–9) — and turned into the fixed user message from the table, never a
+   raw stack trace. #10 has no catch site in application code — see the
+   table row above.
 3. A test asserting the exception → message mapping (§16).
 
 > **Assumed default — confirm or override:** `DocumentTooLargeError`'s limit
@@ -799,6 +800,15 @@ async def run(llm: ChatClient, registry: Registry, session: Session,
         Always cite the source filename (and page, if given) from the tool
         result in your final answer."
 
+    **Updated 2026-09-13 — this quote is the original design, superseded by
+    §13's redesign.** The actual current prompt drops the last sentence
+    entirely and instead tells the model NOT to cite a filename itself
+    ("The source document is cited automatically after your answer — just
+    answer the question, do not state or guess a filename yourself."),
+    because the model composing its own citation from the tool's bracketed
+    hint is exactly how it invented a wrong filename under pressure in
+    testing. See §13 for the current mechanism and why it changed.
+
     Loop shape (unchanged from sibling):
         for _ in range(max_steps):
             assistant_msg = await llm.chat(session.messages(), tools=registry.schemas())
@@ -896,29 +906,63 @@ already does for free once history is in context).
 
 ## 13. Source attribution (assignment §13, bonus +1 page numbers)
 
-Enforced at exactly one place — the `search_documents` tool handler
-(§11.1) — since that's the only text the LLM ever sees about retrieved
-chunks, and the system prompt (§11.2) instructs it to always cite what's in
-that text. Format embedded in the tool result:
+**Updated 2026-09-13 — moved from LLM-composed to code-authored.** The
+original design (below, struck through in spirit) had the LLM compose its
+own "Источник: ..." line from a bracketed hint in the tool result. In
+practice, the model sometimes invented a wrong filename under pressure (a
+"5 days sick leave, per `employee-handbook.pdf`" answer, where no such file
+exists and the real file said 10 days) — it wasn't reading the hint back
+faithfully, it was pattern-matching a plausible-looking citation. Citation
+correctness can't depend on the model's honesty, so it's now enforced in
+code instead.
 
-```text
-[Source: vacation_policy.pdf, page 12]
-<chunk text>
-```
+**Two layers, different jobs:**
 
-for a PDF chunk with a known page, or
+1. **Bracketed hint in the tool result** (`userdocs/tools.py::_format_source`,
+   unchanged) — still embedded in the text the LLM reads, so the model has
+   *some* sense of where an answer comes from while composing its prose:
 
-```text
-[Source: benefits.md]
-<chunk text>
-```
+   ```text
+   [Source: vacation_policy.pdf, page 12]
+   <chunk text>
+   ```
 
-for a non-PDF chunk (`page` is `None`, §5.1). This is a minimum floor, not a
-literal string the final answer must reproduce — the LLM composes the
-final answer's own "Источник: ..." line from this bracketed hint, per the
-system prompt's instruction. **Tested directly** (§16): a unit test on the
-tool handler asserts the bracketed source line's exact format for both a
-PDF-with-page and a non-PDF chunk, independent of what any LLM does with it.
+   The system prompt (§11.2) no longer asks the model to cite this itself —
+   it explicitly tells it not to state or guess a filename, since layer 2
+   below is now the guaranteed source of truth.
+
+2. **Code-authored citation footer** (`userdocs/tools.py::format_citation_footer`,
+   appended by `telegram_bot/handlers/chat.py::handle_text`) — every chunk
+   `search_documents` actually retrieves during a turn is reported via an
+   `on_sources` callback; at the end of the turn, the caller appends a
+   deduped citation line per distinct source, on a new line after the
+   answer:
+
+   ```text
+   <the model's answer>
+
+   Source: vacation_policy.pdf, page 12
+   ```
+
+   or, for a chunk with no page (non-PDF, or the assignment's "or chunk"
+   alternative — §13's own wording):
+
+   ```text
+   Source: benefits.md, chunk #3
+   ```
+
+   (`chunk #N` is 1-indexed from `RetrievedChunk.chunk_index`, for
+   readability — "chunk #1" not "chunk #0".) Multiple distinct sources
+   across the turn (including across more than one `search_documents` call
+   in the same turn's tool-use loop) each get their own line, deduped in
+   first-seen order. No footer is appended when nothing was retrieved (the
+   "no relevant information" case has nothing to cite).
+
+**Tested directly** (§16): unit tests on `_format_source`/`format_citation_footer`
+assert the bracket and footer formats respectively (PDF-with-page, non-PDF,
+dedup-and-order); a `handle_text` test asserts the footer is actually
+appended to the outgoing message and to what's persisted in session
+history — all independent of what any LLM does with the bracketed hint.
 
 ## 14. No-hallucination rule (assignment §14) — exact trigger condition
 
@@ -989,7 +1033,7 @@ hard requirement:
    attribution for a chunk known to start on page 2.
 3. **Retrieval** (`tests/userdocs/test_retrieve.py`) — a query with vector
    search and FTS search both faked/monkeypatched (no real Ollama/model
-   load needed, same pattern as `tests/rag/test_query.py`) → expected
+   load needed, same pattern as `tests/rag/test_retrieve.py`) → expected
    Top-K ordering; a query with all scores below `RELEVANCE_THRESHOLD` →
    `[]`.
 4. **User isolation** — the hard requirement, tested at each of the three
