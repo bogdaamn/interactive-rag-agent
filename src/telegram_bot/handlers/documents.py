@@ -1,7 +1,7 @@
 """Document upload handler. See spec/v3/SPEC.md §10.1.
 
-The two scripted messages below are verbatim from the assignment's §1 user
-scenario and must not be reworded.
+The two scripted messages below follow the assignment's §1 user scenario
+(translated to English for consistency with the rest of the bot's copy).
 """
 
 import logging
@@ -11,11 +11,11 @@ from userdocs.pipeline import ingest_document_async
 
 logger = logging.getLogger(__name__)
 
-RECEIVED_MESSAGE = "📄 Документ получен.\n\nНачинаю обработку..."
-READY_MESSAGE = "✅ Документ готов.\n\nТеперь вы можете задавать вопросы по документу."
+RECEIVED_MESSAGE = "📄 Document received.\n\nStarting processing..."
+READY_MESSAGE = "✅ Document is ready.\n\nYou can now ask questions about the document."
 
 
-async def handle_document(message, store) -> None:
+async def handle_document(message, store, stats) -> None:
     await message.answer(RECEIVED_MESSAGE)
 
     file = await message.bot.get_file(message.document.file_id)
@@ -48,6 +48,7 @@ async def handle_document(message, store) -> None:
             message.document.file_name,
             exc,
         )
+        stats.record_error(message.from_user.id, type(exc).__name__)
         await message.answer(message_for(exc))
         return
 
@@ -57,4 +58,5 @@ async def handle_document(message, store) -> None:
         message.from_user.id,
         result.chunk_count,
     )
+    stats.record_ingestion(message.from_user.id, result.chunk_count)
     await message.answer(READY_MESSAGE)

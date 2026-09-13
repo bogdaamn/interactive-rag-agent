@@ -19,7 +19,31 @@ async def test_chat_returns_content_and_empty_tool_calls():
     client = _client(httpx.MockTransport(handler))
     result = await client.chat([{"role": "user", "content": "hi"}], tools=[])
 
-    assert result == {"content": "Hello!", "tool_calls": []}
+    assert result == {
+        "content": "Hello!",
+        "tool_calls": [],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_token_counts_from_the_ollama_response():
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "Hello!"},
+                "prompt_eval_count": 42,
+                "eval_count": 17,
+            },
+        )
+
+    client = _client(httpx.MockTransport(handler))
+    result = await client.chat([{"role": "user", "content": "hi"}], tools=[])
+
+    assert result["prompt_tokens"] == 42
+    assert result["completion_tokens"] == 17
 
 
 @pytest.mark.asyncio

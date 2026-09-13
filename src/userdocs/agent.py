@@ -25,7 +25,9 @@ SYSTEM_PROMPT = (
     "If the user asks what commands are available or how to use the bot, "
     "answer directly (do not call search_documents for this) by listing: "
     "send a .txt/.md/.docx/.pdf file to index it, /documents to list your "
-    "uploaded documents, and /delete <filename> to remove one."
+    "uploaded documents, /delete <filename> to remove one, and /stats to see "
+    "their usage report — tokens spent, documents indexed, and errors "
+    "encountered."
 )
 
 _STEP_BUDGET_EXHAUSTED = (
@@ -33,10 +35,18 @@ _STEP_BUDGET_EXHAUSTED = (
 )
 
 
-async def run(llm, registry, session, user_text: str, max_steps: int = AGENT_MAX_STEPS) -> str:
+async def run(
+    llm, registry, session, user_text: str, max_steps: int = AGENT_MAX_STEPS, on_llm_usage=None
+) -> str:
     for _ in range(max_steps):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session.messages()
         assistant_message = await llm.chat(messages, tools=registry.schemas())
+
+        if on_llm_usage is not None:
+            on_llm_usage(
+                assistant_message.get("prompt_tokens", 0),
+                assistant_message.get("completion_tokens", 0),
+            )
 
         tool_calls = assistant_message.get("tool_calls") or []
         if not tool_calls:

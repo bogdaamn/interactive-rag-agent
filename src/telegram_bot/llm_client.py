@@ -70,6 +70,8 @@ class OllamaClient:
         return {
             "content": message.get("content", ""),
             "tool_calls": self._normalize_tool_calls(message.get("tool_calls") or []),
+            "prompt_tokens": body.get("prompt_eval_count", 0),
+            "completion_tokens": body.get("eval_count", 0),
         }
 
     async def close(self) -> None:
