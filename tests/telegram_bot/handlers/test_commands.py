@@ -5,7 +5,9 @@ from telegram_bot.handlers.commands import (
     NO_DOCUMENTS_MESSAGE,
     handle_delete_command,
     handle_documents_command,
+    handle_stats_command,
 )
+from telegram_bot.stats import UsageStats
 from userdocs.errors import SQLiteStoreError
 
 
@@ -130,3 +132,51 @@ async def test_documents_command_handles_a_storage_error_gracefully():
 
     assert not any("db is locked" in text for text in message.sent)
     assert message.sent[0].startswith("❌")
+
+
+@pytest.mark.asyncio
+async def test_stats_command_reports_zero_state_for_a_new_user():
+    stats = UsageStats()
+    message = FakeMessage(user_id=1)
+
+    await handle_stats_command(message, stats)
+
+    reply = message.sent[0]
+    assert "Turns answered: 0" in reply
+    assert "Tokens used: 0 (0 prompt / 0 completion)" in reply
+    assert "Documents indexed: 0" in reply
+    assert "Chunks/vectors created: 0" in reply
+    assert "Errors encountered" not in reply
+
+
+@pytest.mark.asyncio
+async def test_stats_command_reports_accumulated_usage():
+    stats = UsageStats()
+    stats.record_turn(1, prompt_tokens=100, completion_tokens=20)
+    stats.record_turn(1, prompt_tokens=50, completion_tokens=10)
+    stats.record_ingestion(1, chunk_count=7)
+    stats.record_error(1, "LLMTimeoutError")
+    message = FakeMessage(user_id=1)
+
+    await handle_stats_command(message, stats)
+
+    reply = message.sent[0]
+    assert "Turns answered: 2" in reply
+    assert "Tokens used: 180 (150 prompt / 30 completion)" in reply
+    assert "Documents indexed: 1" in reply
+    assert "Chunks/vectors created: 7" in reply
+    assert "Errors encountered:" in reply
+    assert "- LLMTimeoutError: 1" in reply
+
+
+@pytest.mark.asyncio
+async def test_stats_command_only_reports_the_senders_own_usage():
+    stats = UsageStats()
+    stats.record_turn(1, prompt_tokens=999, completion_tokens=999)
+    message = FakeMessage(user_id=2)
+
+    await handle_stats_command(message, stats)
+
+    reply = message.sent[0]
+    assert "999" not in reply
+    assert "Turns answered: 0" in reply

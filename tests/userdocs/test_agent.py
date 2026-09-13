@@ -115,3 +115,39 @@ def test_system_prompt_lists_the_bot_commands():
     lowered = SYSTEM_PROMPT.lower()
     assert "/documents" in lowered
     assert "/delete" in lowered
+    assert "/stats" in lowered
+
+
+def test_run_reports_llm_usage_via_callback_once_per_llm_call():
+    llm = ScriptedLLM([
+        {
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "search_documents", "arguments": {"query": "vacation"}}}
+            ],
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+        },
+        {
+            "content": "You get 25 days. Source: policy.pdf",
+            "tool_calls": [],
+            "prompt_tokens": 150,
+            "completion_tokens": 30,
+        },
+    ])
+    session = FakeSession()
+    usage_calls = []
+
+    asyncio.run(
+        run(
+            llm,
+            _echo_registry("25 days"),
+            session,
+            "how many vacation days?",
+            on_llm_usage=lambda prompt_tokens, completion_tokens: usage_calls.append(
+                (prompt_tokens, completion_tokens)
+            ),
+        )
+    )
+
+    assert usage_calls == [(100, 20), (150, 30)]
