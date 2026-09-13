@@ -608,7 +608,25 @@ so it must be run as a module with `src/` on `PYTHONPATH` (which is what both
 `scripts/start.sh` and pytest's `pythonpath = src` setting already do).
 
 Commands: send a `.txt`/`.md`/`.docx`/`.pdf` file to index it, then ask
-questions. `/documents` lists your documents, `/delete <filename>` removes one.
+questions. `/documents` lists your documents, `/delete <filename>` removes
+one, `/stats` shows your usage (tokens spent, documents/chunks indexed,
+errors encountered).
+
+### Usage stats
+
+`/stats` reports, for the requesting user only: cumulative LLM tokens spent
+(prompt + completion, summed per agent turn — a single question can trigger
+more than one LLM call via the tool-use loop, and `/stats` reports the turn
+total rather than each internal call separately), documents and
+chunks/vectors indexed, and error counts by category.
+
+The numbers come from fields Ollama's `/api/chat` already returns
+(`prompt_eval_count`/`eval_count`) and from the ingestion pipeline's own
+chunk count — no extra instrumentation, just surfacing what was already
+computed. Tracking is **in-memory only**: it resets to zero on every bot
+restart, since this is a development-time visibility feature rather than a
+durable product requirement. See `spec/v3/SPEC.md` §20 for the full design
+rationale.
 
 ### Tests and evaluation
 
