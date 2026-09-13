@@ -8,6 +8,13 @@ Source attribution is appended here, not left to the LLM's own prose: every
 chunk search_documents actually retrieved this turn is collected via
 on_sources, and a deduped citation footer is appended to the final answer —
 guaranteed correct regardless of what the model says (spec §13).
+
+search_documents is also run once, deterministically, before the model's
+first turn (see _prefetch_search) — small local models observably skip
+calling the tool even for clearly document-answerable questions, so the
+*whether to search* decision is no longer left entirely to the model. The
+model still decides how to answer, and remains free to call the tool again
+with a different query if it wants to.
 """
 
 import logging
@@ -21,6 +28,24 @@ from userdocs.tool_registry import ToolRegistry
 from userdocs.tools import build_search_documents_tool, format_citation_footer
 
 logger = logging.getLogger(__name__)
+
+
+async def _prefetch_search(registry: ToolRegistry, session, user_text: str) -> None:
+    """Run search_documents once, unconditionally, and feed the result into
+    the session as if the model had already called it this turn.
+
+    This is the deterministic backstop for the agent-loop nudge in
+    userdocs/agent.py: that nudge reduces but doesn't eliminate the model
+    skipping the tool call on hard phrasings (verified against the live
+    qwen2.5:7b/Ollama stack — advice-phrased questions like "how long should
+    employee work before taking any vacations?" still slipped through the
+    nudge in roughly 2/5 tries). Running the search here removes the model's
+    discretion over *whether* to search at all, while leaving *how to
+    answer* — and whether to search again with a refined query — up to it.
+    """
+    call = {"function": {"name": "search_documents", "arguments": {"query": user_text}}}
+    result = await registry.invoke(call)
+    session.append_tool_result(call, result)
 
 
 async def handle_text(message, store, llm, sessions, stats) -> None:
@@ -40,6 +65,8 @@ async def handle_text(message, store, llm, sessions, stats) -> None:
         registry = ToolRegistry(
             [build_search_documents_tool(store, user_id, on_sources=sources.extend)]
         )
+
+        await _prefetch_search(registry, session, message.text)
 
         answer = await agent_run(
             llm,
