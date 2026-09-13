@@ -5,6 +5,7 @@ from telegram_bot.handlers.documents import (
     RECEIVED_MESSAGE,
     handle_document,
 )
+from telegram_bot.stats import UsageStats
 
 
 class FakeSentMessage:
@@ -63,7 +64,7 @@ async def test_handle_document_sends_scripted_received_and_ready_messages(monkey
     monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
 
     message = FakeMessage()
-    await handle_document(message, store=None)
+    await handle_document(message, store=None, stats=UsageStats())
 
     answers = [text for kind, text in message.sent if kind == "answer"]
     assert answers[0] == RECEIVED_MESSAGE
@@ -85,7 +86,7 @@ async def test_handle_document_passes_the_senders_user_id_to_the_pipeline(monkey
     monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
 
     message = FakeMessage(user_id=555, file_name="handbook.pdf", file_bytes=b"pdf bytes")
-    await handle_document(message, store=None)
+    await handle_document(message, store=None, stats=UsageStats())
 
     assert seen["user_id"] == 555
     assert seen["filename"] == "handbook.pdf"
@@ -111,7 +112,7 @@ async def test_handle_document_edits_one_progress_message_per_stage(monkeypatch)
     monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
 
     message = FakeMessage()
-    await handle_document(message, store=None)
+    await handle_document(message, store=None, stats=UsageStats())
 
     edits = [text for kind, text in message.sent if kind == "edit"]
     assert "✅ 127 chunks created" in edits
@@ -151,10 +152,28 @@ async def test_handle_document_survives_a_failed_progress_edit(monkeypatch):
     monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
 
     message = FlakyMessage()
-    await handle_document(message, store=None)
+    await handle_document(message, store=None, stats=UsageStats())
 
     answers = [text for kind, text in message.sent if kind == "answer"]
     assert READY_MESSAGE in answers
+
+
+@pytest.mark.asyncio
+async def test_handle_document_records_ingestion_stats(monkeypatch):
+    import telegram_bot.handlers.documents as documents_module
+
+    async def fake_ingest(store, user_id, filename, raw_bytes, on_progress=None):
+        return type("R", (), {"document_id": 1, "filename": filename, "chunk_count": 7})()
+
+    monkeypatch.setattr(documents_module, "ingest_document_async", fake_ingest)
+
+    message = FakeMessage(user_id=42)
+    stats = UsageStats()
+    await handle_document(message, store=None, stats=stats)
+
+    snapshot = stats.snapshot(42)
+    assert snapshot.documents_indexed == 1
+    assert snapshot.chunks_indexed == 7
 
 
 from telegram_bot.errors import ERROR_MESSAGES
@@ -189,9 +208,36 @@ async def test_handle_document_replies_with_the_mapped_message_on_each_error(mon
     monkeypatch.setattr(documents_module, "ingest_document_async", failing_ingest)
 
     message = FakeMessage()
-    await handle_document(message, store=None)
+    await handle_document(message, store=None, stats=UsageStats())
 
     answers = [text for kind, text in message.sent if kind == "answer"]
     assert ERROR_MESSAGES[error_type] in answers
     assert READY_MESSAGE not in answers
     assert not any("internal detail" in text for text in answers)
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        UnsupportedFormatError,
+        CorruptDocumentError,
+        EmptyDocumentError,
+        DocumentTooLargeError,
+        EmbeddingError,
+        SQLiteStoreError,
+    ],
+)
+@pytest.mark.asyncio
+async def test_handle_document_records_an_error_in_stats_for_each_category(monkeypatch, error_type):
+    import telegram_bot.handlers.documents as documents_module
+
+    async def failing_ingest(store, user_id, filename, raw_bytes, on_progress=None):
+        raise error_type("internal detail")
+
+    monkeypatch.setattr(documents_module, "ingest_document_async", failing_ingest)
+
+    message = FakeMessage(user_id=8)
+    stats = UsageStats()
+    await handle_document(message, store=None, stats=stats)
+
+    assert stats.snapshot(8).errors == {error_type.__name__: 1}

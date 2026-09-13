@@ -15,7 +15,7 @@ RECEIVED_MESSAGE = "📄 Document received.\n\nStarting processing..."
 READY_MESSAGE = "✅ Document is ready.\n\nYou can now ask questions about the document."
 
 
-async def handle_document(message, store) -> None:
+async def handle_document(message, store, stats) -> None:
     await message.answer(RECEIVED_MESSAGE)
 
     file = await message.bot.get_file(message.document.file_id)
@@ -48,6 +48,7 @@ async def handle_document(message, store) -> None:
             message.document.file_name,
             exc,
         )
+        stats.record_error(message.from_user.id, type(exc).__name__)
         await message.answer(message_for(exc))
         return
 
@@ -57,4 +58,5 @@ async def handle_document(message, store) -> None:
         message.from_user.id,
         result.chunk_count,
     )
+    stats.record_ingestion(message.from_user.id, result.chunk_count)
     await message.answer(READY_MESSAGE)
