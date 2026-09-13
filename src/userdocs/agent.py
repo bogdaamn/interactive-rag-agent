@@ -39,11 +39,18 @@ _STEP_BUDGET_EXHAUSTED = (
     "I wasn't able to finish processing that — please try rephrasing your question."
 )
 
+_TOOL_SKIP_NUDGE = (
+    "Before answering, double check: could search_documents find information "
+    "relevant to the user's last message? If so, call it now instead of "
+    "answering directly — do not conclude the documents don't have the "
+    "answer without having called it."
+)
+
 
 async def run(
     llm, registry, session, user_text: str, max_steps: int = AGENT_MAX_STEPS, on_llm_usage=None
 ) -> str:
-    for _ in range(max_steps):
+    for step in range(max_steps):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session.messages()
         assistant_message = await llm.chat(messages, tools=registry.schemas())
 
@@ -55,7 +62,28 @@ async def run(
 
         tool_calls = assistant_message.get("tool_calls") or []
         if not tool_calls:
-            return assistant_message.get("content", "")
+            if step == 0:
+                # Small local models (qwen2.5:7b in practice) sometimes skip
+                # search_documents on the very first turn even when the
+                # question is clearly document-answerable, and answer "not
+                # found" without ever searching. One deterministic, bounded
+                # retry with an explicit nudge catches that false negative
+                # without turning this into an unbounded loop — only step 0
+                # gets it, so a later, deliberate "I'm done" isn't re-nudged.
+                nudged_messages = messages + [{"role": "system", "content": _TOOL_SKIP_NUDGE}]
+                assistant_message = await llm.chat(nudged_messages, tools=registry.schemas())
+
+                if on_llm_usage is not None:
+                    on_llm_usage(
+                        assistant_message.get("prompt_tokens", 0),
+                        assistant_message.get("completion_tokens", 0),
+                    )
+
+                tool_calls = assistant_message.get("tool_calls") or []
+                if not tool_calls:
+                    return assistant_message.get("content", "")
+            else:
+                return assistant_message.get("content", "")
 
         for call in tool_calls:
             result = await registry.invoke(call)

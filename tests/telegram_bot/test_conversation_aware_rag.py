@@ -67,6 +67,7 @@ async def test_followup_question_sees_the_previous_turn(tmp_path):
     # --- Turn 2 --------------------------------------------------------------
     llm_turn2 = RecordingLLM([
         {"content": "Да, до 5 дней. Источник: vacation_policy.pdf", "tool_calls": []},
+        {"content": "Да, до 5 дней. Источник: vacation_policy.pdf", "tool_calls": []},
     ])
     followup = "А можно перенести их на следующий год?"
     session.append_user_message(followup)
@@ -103,7 +104,7 @@ async def test_followup_prompt_does_not_carry_the_previous_turns_tool_output(tmp
     )
     session.append_assistant_message(answer1)
 
-    llm_turn2 = RecordingLLM([{"content": "Да.", "tool_calls": []}])
+    llm_turn2 = RecordingLLM([{"content": "Да.", "tool_calls": []}, {"content": "Да.", "tool_calls": []}])
     session.append_user_message("А перенести их можно?")
     await agent_run(llm_turn2, _registry(), session, "А перенести их можно?")
 
@@ -121,7 +122,10 @@ async def test_one_users_turns_never_appear_in_anothers_prompt(tmp_path):
     session_a.append_assistant_message("Band 7. Источник: confidential_comp.pdf")
 
     session_b = store.get_or_create(user_id=2)
-    llm = RecordingLLM([{"content": "The office opens at 9.", "tool_calls": []}])
+    llm = RecordingLLM([
+        {"content": "The office opens at 9.", "tool_calls": []},
+        {"content": "The office opens at 9.", "tool_calls": []},
+    ])
     session_b.append_user_message("What are the office hours?")
     await agent_run(llm, _registry(), session_b, "What are the office hours?")
 

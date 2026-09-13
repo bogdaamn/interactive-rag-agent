@@ -47,14 +47,70 @@ def _echo_registry(result_text="the tool result"):
     ])
 
 
-def test_run_returns_content_directly_when_no_tool_calls():
-    llm = ScriptedLLM([{"content": "Hello!", "tool_calls": []}])
+def test_run_returns_content_directly_when_no_tool_calls_on_retry():
+    # First response skips the tool (see test_run_retries_once_...) — the nudge
+    # retry's response is what's returned when it also skips the tool.
+    llm = ScriptedLLM([
+        {"content": "Hi, how can I help?", "tool_calls": []},
+        {"content": "Hello!", "tool_calls": []},
+    ])
     session = FakeSession()
 
     answer = asyncio.run(run(llm, _echo_registry(), session, "hi"))
 
     assert answer == "Hello!"
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
+
+
+def test_run_retries_once_with_a_nudge_when_first_response_skips_the_tool():
+    # qwen2.5:7b reproducibly skips search_documents on some phrasings of a
+    # document-answerable question (e.g. "How many days of vacation do
+    # employees have?") even though the document is indexed and scores well
+    # above the relevance threshold — see the conversation that motivated
+    # this fix. A single deterministic retry with an explicit nudge, fired
+    # only on the very first LLM turn, catches that failure mode without
+    # adding an unbounded loop.
+    llm = ScriptedLLM([
+        {"content": "I did not find that information in your documents.", "tool_calls": []},
+        {
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "search_documents", "arguments": {"query": "vacation days"}}}
+            ],
+        },
+        {"content": "You get 25 days. Source: policy.pdf", "tool_calls": []},
+    ])
+    session = FakeSession()
+
+    answer = asyncio.run(
+        run(llm, _echo_registry("25 days"), session, "How many days of vacation do employees have?")
+    )
+
+    assert answer == "You get 25 days. Source: policy.pdf"
+    assert len(llm.calls) == 3
+    # the nudge only appears in the retry call, not the first attempt
+    assert not any("nudge" in str(m).lower() or "double check" in str(m).lower() for m in llm.calls[0]["messages"])
+    assert any(m["role"] == "system" for m in llm.calls[1]["messages"][1:])
+
+
+def test_run_does_not_nudge_a_second_time_after_the_first_step():
+    # Only step 0 gets the retry. If the model stops calling tools on a later
+    # step, that's treated as a real "I'm done" rather than another skip.
+    llm = ScriptedLLM([
+        {
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "search_documents", "arguments": {"query": "vacation"}}}
+            ],
+        },
+        {"content": "You get 25 days.", "tool_calls": []},
+    ])
+    session = FakeSession()
+
+    answer = asyncio.run(run(llm, _echo_registry("25 days"), session, "how many vacation days?"))
+
+    assert answer == "You get 25 days."
+    assert len(llm.calls) == 2
 
 
 def test_run_invokes_tool_then_returns_the_followup_answer():
@@ -78,7 +134,7 @@ def test_run_invokes_tool_then_returns_the_followup_answer():
 
 
 def test_run_prepends_the_system_prompt_on_the_first_call():
-    llm = ScriptedLLM([{"content": "ok", "tool_calls": []}])
+    llm = ScriptedLLM([{"content": "ok", "tool_calls": []}, {"content": "ok", "tool_calls": []}])
     session = FakeSession()
 
     asyncio.run(run(llm, _echo_registry(), session, "hi"))
