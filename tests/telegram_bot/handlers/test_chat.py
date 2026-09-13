@@ -3,6 +3,7 @@ import pytest
 from telegram_bot.errors import ERROR_MESSAGES
 from telegram_bot.handlers.chat import handle_text
 from telegram_bot.llm_errors import LLMError, LLMTimeoutError
+from telegram_bot.stats import UsageStats
 
 
 class FakeMessage:
@@ -44,14 +45,14 @@ class FakeSessionStore:
 async def test_handle_text_replies_with_the_agents_answer(monkeypatch):
     import telegram_bot.handlers.chat as chat_module
 
-    async def fake_run(llm, registry, session, user_text, max_steps=4):
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
         return "You get 25 days. Source: policy.pdf"
 
     monkeypatch.setattr(chat_module, "agent_run", fake_run)
 
     message = FakeMessage()
     sessions = FakeSessionStore()
-    await handle_text(message, store=None, llm=None, sessions=sessions)
+    await handle_text(message, store=None, llm=None, sessions=sessions, stats=UsageStats())
 
     assert message.sent == ["You get 25 days. Source: policy.pdf"]
 
@@ -60,14 +61,14 @@ async def test_handle_text_replies_with_the_agents_answer(monkeypatch):
 async def test_handle_text_records_both_sides_of_the_turn_in_the_session(monkeypatch):
     import telegram_bot.handlers.chat as chat_module
 
-    async def fake_run(llm, registry, session, user_text, max_steps=4):
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
         return "25 days."
 
     monkeypatch.setattr(chat_module, "agent_run", fake_run)
 
     message = FakeMessage(text="how many vacation days?", user_id=9)
     sessions = FakeSessionStore()
-    await handle_text(message, store=None, llm=None, sessions=sessions)
+    await handle_text(message, store=None, llm=None, sessions=sessions, stats=UsageStats())
 
     session = sessions.sessions[9]
     assert ("user", "how many vacation days?") in session.appended
@@ -84,14 +85,14 @@ async def test_handle_text_builds_a_tool_registry_bound_to_the_sender(monkeypatc
         seen["user_id"] = user_id
         return type("T", (), {"name": "search_documents", "schema": lambda self: {}})()
 
-    async def fake_run(llm, registry, session, user_text, max_steps=4):
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
         return "ok"
 
     monkeypatch.setattr(chat_module, "build_search_documents_tool", fake_build_tool)
     monkeypatch.setattr(chat_module, "agent_run", fake_run)
 
     message = FakeMessage(user_id=4242)
-    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore())
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=UsageStats())
 
     assert seen["user_id"] == 4242
 
@@ -101,13 +102,13 @@ async def test_handle_text_builds_a_tool_registry_bound_to_the_sender(monkeypatc
 async def test_handle_text_replies_with_the_mapped_message_on_llm_failure(monkeypatch, error_type):
     import telegram_bot.handlers.chat as chat_module
 
-    async def failing_run(llm, registry, session, user_text, max_steps=4):
+    async def failing_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
         raise error_type("connection refused to ollama at localhost:11434")
 
     monkeypatch.setattr(chat_module, "agent_run", failing_run)
 
     message = FakeMessage()
-    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore())
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=UsageStats())
 
     assert message.sent == [ERROR_MESSAGES[error_type]]
     assert not any("localhost:11434" in text for text in message.sent)
@@ -119,14 +120,51 @@ async def test_handle_text_does_not_record_an_assistant_message_when_the_llm_fai
     non-answer, or the next follow-up question inherits it as context."""
     import telegram_bot.handlers.chat as chat_module
 
-    async def failing_run(llm, registry, session, user_text, max_steps=4):
+    async def failing_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
         raise LLMError("boom")
 
     monkeypatch.setattr(chat_module, "agent_run", failing_run)
 
     message = FakeMessage(user_id=3)
     sessions = FakeSessionStore()
-    await handle_text(message, store=None, llm=None, sessions=sessions)
+    await handle_text(message, store=None, llm=None, sessions=sessions, stats=UsageStats())
 
     roles = [role for role, _text in sessions.sessions[3].appended]
     assert "assistant" not in roles
+
+
+@pytest.mark.asyncio
+async def test_handle_text_records_turn_usage_in_stats(monkeypatch):
+    import telegram_bot.handlers.chat as chat_module
+
+    async def fake_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        on_llm_usage(100, 20)
+        on_llm_usage(50, 10)
+        return "25 days."
+
+    monkeypatch.setattr(chat_module, "agent_run", fake_run)
+
+    message = FakeMessage(user_id=9)
+    stats = UsageStats()
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=stats)
+
+    snapshot = stats.snapshot(9)
+    assert snapshot.prompt_tokens == 150
+    assert snapshot.completion_tokens == 30
+    assert snapshot.turns == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_text_records_an_error_in_stats_on_llm_failure(monkeypatch):
+    import telegram_bot.handlers.chat as chat_module
+
+    async def failing_run(llm, registry, session, user_text, max_steps=4, on_llm_usage=None):
+        raise LLMError("boom")
+
+    monkeypatch.setattr(chat_module, "agent_run", failing_run)
+
+    message = FakeMessage(user_id=3)
+    stats = UsageStats()
+    await handle_text(message, store=None, llm=None, sessions=FakeSessionStore(), stats=stats)
+
+    assert stats.snapshot(3).errors == {"LLMError": 1}
