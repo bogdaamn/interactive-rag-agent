@@ -142,8 +142,13 @@ def test_retrieve_applies_reranking_when_enabled(monkeypatch):
     )
     monkeypatch.setattr(retrieve_module, "HYBRID_SEARCH_ENABLED", False)
     monkeypatch.setattr(retrieve_module, "RERANK_ENABLED", True)
-    # rerank reverses the order, so a difference is observable
-    monkeypatch.setattr(retrieve_module, "rerank", lambda query, candidates: list(reversed(candidates)))
+    # rerank reverses the order, so a difference is observable; both score
+    # above RERANK_THRESHOLD so neither is dropped.
+    monkeypatch.setattr(
+        retrieve_module,
+        "rerank_with_scores",
+        lambda query, candidates: [(c, 1.0) for c in reversed(candidates)],
+    )
 
     store = FakeStore(
         vector_hits=[(1, 0.90), (2, 0.80)],
@@ -158,6 +163,37 @@ def test_retrieve_applies_reranking_when_enabled(monkeypatch):
     assert [r.text for r in results] == ["second by vector", "first by vector"]
 
 
+def test_retrieve_drops_candidates_that_pass_the_cosine_threshold_but_fail_rerank(monkeypatch):
+    """A chunk can clear the coarse vector-cosine gate (RELEVANCE_THRESHOLD)
+    while still not actually answering the question — the cross-encoder is a
+    second, more precise relevance gate on its own scale (see rerank.py)."""
+    import userdocs.retrieve as retrieve_module
+
+    monkeypatch.setattr(
+        retrieve_module, "embed_chunks", lambda texts: np.zeros((1, 384), dtype=np.float32)
+    )
+    monkeypatch.setattr(retrieve_module, "HYBRID_SEARCH_ENABLED", False)
+    monkeypatch.setattr(retrieve_module, "RERANK_ENABLED", True)
+    monkeypatch.setattr(retrieve_module, "RERANK_THRESHOLD", 0.0)
+    monkeypatch.setattr(
+        retrieve_module,
+        "rerank_with_scores",
+        lambda query, candidates: [(candidates[0], 7.16), (candidates[1], -5.53)],
+    )
+
+    store = FakeStore(
+        vector_hits=[(1, 0.65), (2, 0.44)],
+        chunks={
+            1: {"text": "actually answers it", "chunk_index": 0, "page": None, "filename": "handbook.docx"},
+            2: {"text": "same topic, doesn't answer it", "chunk_index": 0, "page": None, "filename": "other.pdf"},
+        },
+    )
+
+    results = retrieve(store, user_id=1, query="q")
+
+    assert [r.text for r in results] == ["actually answers it"]
+
+
 def test_retrieve_falls_back_to_unreranked_order_when_rerank_fails(monkeypatch):
     import userdocs.retrieve as retrieve_module
 
@@ -170,7 +206,7 @@ def test_retrieve_falls_back_to_unreranked_order_when_rerank_fails(monkeypatch):
     def boom(query, candidates):
         raise RerankError("model unavailable")
 
-    monkeypatch.setattr(retrieve_module, "rerank", boom)
+    monkeypatch.setattr(retrieve_module, "rerank_with_scores", boom)
 
     store = FakeStore(
         vector_hits=[(1, 0.90), (2, 0.80)],

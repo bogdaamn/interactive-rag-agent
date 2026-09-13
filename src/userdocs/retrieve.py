@@ -11,6 +11,15 @@ Hybrid search (bonus) fuses the vector branch with an FTS5 keyword branch via
 RRF. A chunk that only the keyword branch found has no cosine similarity from
 the vector search, so it can't be threshold-checked — those are dropped rather
 than admitted unscored, keeping the threshold the single gate for every branch.
+
+Reranking (bonus) is a second, independent relevance gate, not just a
+reordering step: it never re-admits a chunk that failed the vector-cosine
+threshold above, but it can and does drop a chunk that passed it — cosine
+similarity alone isn't precise enough to tell "same topic area" apart from
+"actually answers this" when a corpus has short, single-chunk documents on
+related subjects (verified directly: a notice-period question let an
+unrelated vacation-policy chunk clear the cosine threshold at 0.44, while the
+cross-encoder scored it -5.53, well below RERANK_THRESHOLD). See rerank.py.
 """
 
 from dataclasses import dataclass
@@ -20,12 +29,13 @@ from userdocs.config import (
     HYBRID_SEARCH_ENABLED,
     RELEVANCE_THRESHOLD,
     RERANK_ENABLED,
+    RERANK_THRESHOLD,
     TOP_K,
 )
 from userdocs.embed import embed_chunks
 from userdocs.errors import RerankError
 from userdocs.fusion import rrf_fuse
-from userdocs.rerank import rerank
+from userdocs.rerank import rerank_with_scores
 from userdocs.textsearch import search_fts
 
 
@@ -71,7 +81,8 @@ def retrieve(store, user_id: int, query: str) -> list:
 
     if RERANK_ENABLED and survivors:
         try:
-            survivors = rerank(query, survivors)
+            ranked = rerank_with_scores(query, survivors)
+            survivors = [chunk for chunk, score in ranked if score >= RERANK_THRESHOLD]
         except RerankError:
             # Reranking is a quality improvement, not a correctness
             # requirement — keep the pre-rerank order rather than losing the
